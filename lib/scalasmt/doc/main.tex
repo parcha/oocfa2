@@ -1,0 +1,179 @@
+\documentclass[serif,t,11pt]{beamer}
+%% I used the following pages while writing this presentation:
+%%  http://heather.cs.ucdavis.edu/~matloff/beamer.html#tour
+%%  http://www.math.umbc.edu/~rouben/beamer/
+\usepackage{listings}
+\usepackage{eulervm}
+\usepackage{palatino}
+\usepackage{hyperref}
+\usepackage{scaladoc}
+
+\urlstyle{same}
+\usetheme{CambridgeUS}
+\setbeamertemplate{navigation symbols}{} % no navigation icons
+
+\author{Kuat Yessenov}
+\title{Scala Tutorial}
+\date{September 21, 2010}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+\begin{frame}{Learning Scala}
+% learn by doing; resources
+
+Resources on the web:
+\begin{enumerate}
+\item Download latest version (2.8.0): \url{http://www.scala-lang.org/}
+\item API: \url{http://www.scala-lang.org/api}
+\item Q\&A: \url{http://stackoverflow.com/}
+\end{enumerate}
+
+IDEs and tools:
+\begin{enumerate}
+\item IntelliJ IDEA 9 with Scala plugin: \url{http://www.jetbrains.com/idea/}
+\item Emacs/Vim modes and syntax files
+\item Simple Build Tool: \url{http://code.google.com/p/simple-build-tool/}
+\item ScalaCheck: \url{http://code.google.com/p/scalacheck/}
+\end{enumerate}
+\end{frame}
+
+\section{Programming in Scala}
+
+\begin{frame}{Scala for Java/C\# Refugees}
+\begin{alertblock}{Similarities}
+\begin{enumerate}
+\item object-oriented
+\item support Java style 
+\item compiles to Java byte code and interoperates with existing Java code
+\end{enumerate}
+\end{alertblock}
+\end{frame}
+
+\begin{frame}{Scala for Java/C\# Refugees}
+\begin{alertblock}{Differences}
+\begin{enumerate}
+\item \code{==} always corresponds to \code{equals}
+\item use \code{var} to declare mutable variables 
+\item use \code{val} to declare immutable variables
+\item use \code{def} to declare functions
+\item use \code{class} to declare a class
+\item use \code{object} to declare a companion object
+\item use \code{package} to declare a module
+\item default access is \code{public}
+\item parametric types \code{List[T]}
+\item two collection libraries: mutable and immutable; immutable by default
+\item $\ldots$
+\end{enumerate}
+\end{alertblock}
+\end{frame}
+
+\begin{frame}{Types}
+\begin{enumerate}
+\item Numeric types: Int, Long, ...
+\item Other basic types: Boolean, String
+\item Symbols: \code{'ident} instances of \code{scala.Symbol}
+\item Topmost types: \code{Any} is top, \code{AnyVal}, \code{AnyRef} (=\code{Object}), \code{Unit}
+\item Bottom types: \code{Null} is subtype of all reference classes, \code{Nothing} is bottom
+\item Traits: like interfaces but permit method bodies
+\end{enumerate}
+
+Scala has a sophisticated type inference. % when it can't figure it out, it's probably better to annotate types anyways 
+
+\begin{block}{Functions are first-class}
+\code{args.foreach\{arg => println(arg)\}}\\
+\code{args.foreach(println _)}\\
+Scala function closures capture the variables themselves, not the values.
+\end{block}
+% function literals, function values, placeholder syntax, partially apply
+\end{frame}
+
+\section{Cool Features}
+
+\begin{frame}{Case Classes and Pattern Matching}
+\begin{exampleblock}{Sample case class}
+\lstinputlisting{case-classes.scala}
+\end{exampleblock}
+
+\pause
+
+\begin{alertblock}{Scala compiler treats case classes specially}
+\begin{enumerate}
+\item adds a factory method with the name of the class (\code{Some(x)})
+\item arguments in the parameters list are \emph{vals}
+\item auto-generates \code{toString}, \code{hashCode}, and structural equality
+\item auto-generates \code{copy} using named/default parameters
+\end{enumerate}
+\end{alertblock}
+
+\pause
+
+\begin{alertblock}{Beware!}
+Make abstract class \emph{sealed} and never inherit case classes from case classes.
+\end{alertblock}
+
+\end{frame}
+
+\begin{frame}{Implicit Definitions}
+
+\emph{Implicit definitions} are methods that the compiler is allowed to insert into a program in order to fix any of its type errors: 
+\begin{center}
+\code{def convert(a: T): U = ...}
+\end{center}
+
+\pause
+
+\begin{alertblock}{Rules}
+\begin{enumerate}
+\item \emph{Marking}: Only definitions marked \emph{implicit} are available.
+\item \emph{Scope}: Implicit conversion must be in scope as a single identifier or be associated with the source or target type of the conversion.% a.convert never tried; companion objects are also looked up
+\item \emph{Non-ambiguity}: A conversion is inserted only if there is no other possible conversion to insert.
+\item \emph{One-at-a-time}: Only one implicit conversion is tried.
+\item \emph{Explicits-First}: Whenever code type checks as it is, no conversions are attempted.
+\item \emph{Naming}: Implicit conversion methods can have arbitrary names.
+\end{enumerate}
+\end{alertblock}
+
+\end{frame}
+
+\begin{frame}{Implicit Parameters}
+
+\lstinputlisting{implicit-parameters.scala}
+
+\end{frame}
+
+\begin{frame}{Internal DSL Design}
+
+\begin{exampleblock}{Syntactic sugar}
+\begin{columns}
+\begin{column}[l]{5cm}
+\code{0 to 2}\\
+\code{Console println 10}\\
+\code{o m (p,q)}\\
+\code{a(i)}\\
+\code{a(i) = j}\\
+\end{column}
+\begin{column}[r]{5cm}
+\code{0.to(2)}\\
+\code{Console.println(10)}\\
+\code{o.m(p,q)}\\
+\code{a.apply(i)}\\
+\code{a.update(i,j)}\\
+\end{column}
+\end{columns}
+\end{exampleblock}
+
+\pause
+
+\begin{alertblock}{All operators are resolved to method calls}
+Scala decides \emph{precedence} based on the first character (unless it ends with \code{=} and not a comparison operator.)
+Consistent with precedence rules for arithmetic operators.
+
+Scala decides \emph{associativity} based on the last character of an operator. Any method that ends in a \code{:} is invoked on its right operand, passing in the left operand. 
+
+\emph{Unary operators} correspond to methods prefixed with \code{unary\_}.
+\end{alertblock}
+\end{frame}
+
+\end{document}

@@ -1,0 +1,7 @@
+Z3 binding ideas
+  model finite sets using theory of arrays and lists as recursive data types
+  use scalars to represent finite domains
+  pay attention to uninterpreted issues
+  that is produce a definedness checks to avoid problems with lack of interpretation
+
+vim: set spell autoindent:

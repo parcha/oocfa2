@@ -1,0 +1,9 @@
+syntax:glob
+target
+lib_managed
+src_managed
+project/boot
+*.iml
+.idea
+*.class
+sbt-launch-0.7.*.jar
