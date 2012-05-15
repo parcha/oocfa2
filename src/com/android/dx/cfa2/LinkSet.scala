@@ -2,7 +2,7 @@ package com.android.dx.cfa2
 
 import scala.collection._
 
-trait LinkSet[E, +P <: Set[E]] extends Set[E] {
+trait LinkSet[E, +P <: Set[E]] extends Set[E] with Serializable {
   val parent: P
   abstract override def contains(elem:E) =
     if(super.contains(elem)) true

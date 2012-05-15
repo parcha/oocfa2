@@ -6,7 +6,7 @@ import collection.mutable._
 import java.util.concurrent.ConcurrentHashMap
 
 class MutableConcurrentMap[K, V]
-extends JConcurrentMapWrapper[K, V](new ConcurrentHashMap)
+extends JConcurrentMapWrapper[K, V](new ConcurrentHashMap) with Serializable
 //extends HashMap[K, V] with SynchronizedMap[K, V]
 
 final class MutableConcurrentMultiMap[K,V]

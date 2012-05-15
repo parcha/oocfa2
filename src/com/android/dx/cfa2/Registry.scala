@@ -3,7 +3,7 @@ package com.android.dx.cfa2
 import scala.collection._
 import scala.ref.WeakReference
 
-trait Registry[K, V <: AnyRef] extends mutable.Map[K, WeakReference[V]] {
+trait Registry[K, V <: AnyRef] extends mutable.Map[K, WeakReference[V]] with Serializable {
   import Registry._
   def register(k:K, v:V) = this += ((k, new WeakReference(v)))
   def registered(k:K) = this get k match {

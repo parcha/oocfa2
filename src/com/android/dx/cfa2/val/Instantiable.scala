@@ -21,7 +21,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   //type Self <: this.type
   final type Self = this.type
   
-  sealed abstract class Value extends Immutable with NotNull {
+  sealed abstract class Value extends Immutable with NotNull with Serializable {
     final val typ: Self = self
     final def isValueOf(t: Instantiable) = typ < t 
     val isUnknown : Boolean

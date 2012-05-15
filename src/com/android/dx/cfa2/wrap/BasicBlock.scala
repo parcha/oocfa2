@@ -48,6 +48,7 @@ object BasicBlock {
     new C#Map with C#Cacher
   }
   private def intern(raw:RawBB, parent: Method) = cache.cache(raw, new BasicBlock(raw, parent))
+  
   def wrap(raw: RawBB, parent: Method) = cache cachedOrElse (raw, intern(raw, parent))
   implicit def unwrap(bb:BasicBlock) = bb.raw
 }

@@ -8,7 +8,7 @@ import dx.dex.file.EncodedField
 import scala.collection._
 
 //FIXME: Hack relying on FieldSpec = SFieldSpec = IFieldSpec
-sealed abstract case class FieldSlot(val spec:FieldSpec) {
+sealed abstract case class FieldSlot(val spec:FieldSpec) extends Immutable with NotNull {
   final val typ : Instantiable = Type(spec.getType).asInstanceOf[Instantiable]
 }
 object FieldSlot {

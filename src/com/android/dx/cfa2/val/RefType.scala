@@ -40,7 +40,7 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
      * often. Therefore, one should only use defs, storing more permanent vals in self.
      */
     protected[this] class Ref_(protected[this] implicit val env: HeapEnv)
-    extends Var.RawHeap[typ.type](self.heapToken) with Immutable /*with NotNull*/ { _:Ref =>
+    extends Var.RawHeap[typ.type](self.heapToken) with Immutable /*with NotNull*/ with Serializable { _:Ref =>
       // Forwarded methods from Instantiable.Instance
       @inline
       protected[this] final def clone(_params: (Symbol, Any)*)(extraDeps: Val_ *) : Instance =

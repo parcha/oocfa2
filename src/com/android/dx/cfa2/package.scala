@@ -14,7 +14,7 @@ package object cfa2 {
     case c:CstLong      => Val.Atom(LONG.instance(c.getValue))
     case c:CstFloat     => Val.Atom(FLOAT.instance(c.getValue))
     case c:CstDouble    => Val.Atom(DOUBLE.instance(c.getValue))
-    case c:CstString    => Val.Atom(STRING.instance(c.getString.getString))
+    case c:CstString    => Val.Atom(STRING.instance(c.getString))
     case c:CstType      => Val.Atom(CLASS.instance(Val.Bottom, ('desc, c.getDescriptor.getString)))
     case c:CstKnownNull => Val.Atom(NULL.singleton)
   }

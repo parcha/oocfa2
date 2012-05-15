@@ -66,7 +66,8 @@ object CFA2Analysis {
   
   type EncodedTrace = scala.Array[Int]
   type TracerRepr = immutable.Vector[BB]
-  final class Tracer(val self: TracerRepr) extends SeqProxyLike[BB, TracerRepr] with Immutable {
+  final class Tracer(val self: TracerRepr)
+  extends SeqProxyLike[BB, TracerRepr] with Immutable with NotNull with Serializable {
     def dominates(t:Tracer) : Boolean =
       if(t.length > length) false
       else this endsWith(t)
@@ -105,16 +106,16 @@ object CFA2Analysis {
   final case class BBSummary(static_env_out: StaticEnv,
                              tracef_out: TraceFrame,
                              heap_out: HeapEnv.M,
-                             uncaught_out: immutable.Set[Exceptional]) extends Immutable
+                             uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
   type BBSummaries = MutableConcurrentMap[BB, MutableConcurrentMap[BBIndex, BBSummary]]
   
   final case class FIndex(static_env: StaticEnv,
                           params: Seq[Val[SUBT[Instantiable]]]) extends Immutable
   final case class FSummary(uncaught_throws: MutableConcurrentMultiMap[EncodedTrace, Exceptional],
-                            rets: MutableConcurrentMap[EncodedTrace, RetVal])
+                            rets: MutableConcurrentMap[EncodedTrace, RetVal]) extends Immutable with NotNull
   type FSummaries = MutableConcurrentMap[Method, MutableConcurrentMap[FIndex, FSummary]]
                             
-  final case class TracedExceptional(v: VAL[Exceptional]) extends Exception
+  //final case class TracedExceptional(v: VAL[Exceptional]) extends Exception
   
   /**
    * To keep "hidden" state in between two or more instruction evaluations or BBs
@@ -125,7 +126,7 @@ object CFA2Analysis {
   final case class BBEvalState(param_index: Int,
                                retval: Val_,
                                error: Val[Exceptional],
-                               pseudo: Val_) extends Immutable {
+                               pseudo: Val_) extends Immutable with NotNull {
     def update(param_index_ :Int      = param_index,
                retval_ :Val_          = retval,
                error_ :Val[Exceptional] = error,
@@ -136,7 +137,7 @@ object CFA2Analysis {
   final case class BBTrace(bb: BB,
                           tracer : Tracer,
                           _eval_state: BBEvalState,
-                          _static_env: StaticEnv, _tracef: TraceFrame)
+                          _static_env: StaticEnv, _tracef: TraceFrame) extends Immutable with NotNull
   
   /**
    * 4-phase, infinitely-tiered tracing so that we can shallowly
@@ -373,7 +374,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                           recursiveStack: List[FIndex],
                           params: Val[SUBT[Instantiable]]*) : FSummary = {
     log('debug) ("\nTracing "+meth+" ["+recursiveStack.size+"]")
-    BREAK
+    
     log('debug) ("Params: "+params)
     //log out meth.dump
     val findex = FIndex(static_env, params)
@@ -422,7 +423,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                _eval_state: BBEvalState,
                _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv.M) : Unit = {
     log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_tracer.length+"]")
-    BREAK
+    
     val tracer = _tracer :+ bb
     log('debug) ("Tracer: "+tracer)
     
@@ -762,7 +763,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
             else
               log('debug) ("Non-recursive call from "+meth+" to "+m)
             //try {
-            BREAK
+            
             var result = trace(m, static_env_, recursiveStack_, params:_*)
             HOOK(opts.kmethod_hooks, (spec, params, result), {result = _:FSummary})
             eval_summary(result)
@@ -835,7 +836,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast
     log('debug) ("Ending on "+br.toHuman)
-    BREAK
+    
     
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
@@ -1080,7 +1081,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
            BBEvalState(0, null, null, null),
            findex.static_env, new TraceFrame, HeapEnv.defaultM)//.result
   assert((fsummaries contains meth) && (fsummaries(meth) contains findex))
-  BREAK
+  
   return fsummaries(meth)(findex)
   } // End mtrace
 

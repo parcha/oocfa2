@@ -3,7 +3,7 @@ package com.android.dx.cfa2
 import scala.collection._
 
 /** Linked maps which are composed of a linked chain of maps */
-trait LinkMap[K, +V, +P <: Map[K, V]] extends Map[K,V] {
+trait LinkMap[K, +V, +P <: Map[K, V]] extends Map[K,V] with Serializable {
   val parent: P
   final abstract override def get(key:K) : Option[V] =
     super.get(key) match {

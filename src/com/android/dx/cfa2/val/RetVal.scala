@@ -2,7 +2,7 @@ package com.android.dx.cfa2.`val`
 
 import Type._
 
-sealed abstract class RetVal extends Immutable {
+sealed abstract class RetVal extends Immutable with NotNull with Serializable {
   import RetVal._
   def union[RV <: RetVal](other: RV) : RetVal
 }

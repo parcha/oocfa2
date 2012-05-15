@@ -1,4 +1,0 @@
-#!/bin/sh
-DIR=`dirname $0`/..
-JARS=$DIR/lib/copris-v1-0-1.jar:$DIR/lib/sugar-v1-15-0.jar:$DIR/lib/org.sat4j.core.jar
-scala -cp .:classes:$JARS $*

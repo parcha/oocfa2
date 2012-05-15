@@ -12,7 +12,7 @@ import tlc.Algebra._
  * Leaf classes should be case classes based on src (or its components) such that
  * two Vars with the same src are considered the same.
  */
-sealed abstract class Var[+T <: Instantiable] extends Immutable with NotNull {
+sealed abstract class Var[+T <: Instantiable] extends Immutable with NotNull with Serializable {
   type Source
   val src: Source
   type VT = T

@@ -14,7 +14,7 @@ import immutable._
 import parallel.immutable._
 
 sealed abstract class Val[+T <: Instantiable]
-extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable {
+extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable {
   import Val._
   // TODO: Allow us to infer/capture the LUB of the typs of these vals
   final type Type = T

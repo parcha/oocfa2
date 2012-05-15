@@ -23,7 +23,14 @@ sealed case class ROperator protected (private val raw:Rop) extends Immutable wi
   def isCallLike = raw isCallLike
 }
 object ROperator {
-  implicit def wrap(raw:Rop) = new ROperator(raw)
+  //TODO: does this need to be threadsafe?
+  private val cache = {
+    type C = Cached[Rop, ROperator, MutableConcurrentMap]
+    new C#Map with C#Cacher
+  }
+  private def intern(raw:Rop) = cache.cache(raw, new ROperator(raw))
+  
+  implicit def wrap(raw:Rop) = cache cachedOrElse (raw, intern(raw))
   implicit def unwrap(op:ROperator) = op.raw
   
   object Branchingnesses extends Enumeration(1) {

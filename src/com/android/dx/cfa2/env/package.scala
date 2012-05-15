@@ -13,7 +13,7 @@ import collection.{parallel => par}
 package object env {
   
   trait Env[VarT <: Var_] extends Map[VarT, Val_]
-  with PrettyMap[VarT, Val_] with Dumpable with NotNull {
+  with PrettyMap[VarT, Val_] with Dumpable with NotNull with Serializable {
     override protected def keyStr(k:VarT) = "[" + k.toString + "]"
     
     def induceUnknowns[E <: Map[VarT, Val_]](prev: E) : Map[VarT, Val_] = {

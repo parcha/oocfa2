@@ -5,7 +5,7 @@ import scala.collection._
 /**
  * Kleene's trinary logic
  */
-sealed abstract class Tri extends Immutable with NotNull {
+sealed abstract class Tri extends Immutable with NotNull with Serializable {
   import Tri._
   final def &(o: =>Tri) = this match {
     case T => o
