@@ -21,6 +21,10 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   //type Self <: this.type
   final type Self = this.type
   
+  /**
+   * Represents a value of this type. They must be referentially distinct within the
+   * abstract interpretation so that they can be individually and uniquely tracked.
+   */
   sealed abstract class Value extends Immutable with NotNull with Serializable {
     final val typ: Self = self
     final def isValueOf(t: Instantiable) = typ < t 
@@ -47,7 +51,9 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
         val set = for(v <- vs.asSet) yield dependsUpon(v)
         Tri.any(set)
     }
-    final def dependsUpon(vs: GenIterable[Val_]) : Tri = Tri.any(vs map (dependsUpon(_)))
+    /** extraDeps is for e.g. control dependencies */
+    final def dependsUpon(vs: GenIterable[Val_], extraDeps: Val_) : Tri =
+      Tri.any(vs map dependsUpon)
   }
   /**
    * This is for an entirely unknown instance of this type. Importantly, there is a similar but
@@ -97,10 +103,9 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     protected final def equivalentParams(params: IParams) = this.params == params
     
     /** Can be overloaded in subclasses with cloners which take other params */
-    //final protected def clone : Instance = constructor(params, deps)
-    protected[this] final def clone(_params: (Symbol, Any)*)(extraDeps: Val_ *) : Instance =
+    final def clone(_params: (Symbol, Any)*)(implicit extraDeps: Val_ *) : Instance =
       clone(paramify(_params:_*), extraDeps)
-    protected[this] final def clone(_params: IParams, extraDeps: Seq[Val_]) : Instance = {
+    final def clone(_params: IParams, extraDeps: Seq[Val_]) : Instance = {
       val deps_ = deps union Val.Atom(this) union Val.deepUnion(extraDeps)
       var params_ = _params
       def addMissingParams(ps: IParams) = params_ ++= (for((k,v) <- ps if!(params_ contains k)) yield (k,v))
@@ -111,6 +116,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
         
       constructor(params_, deps_)
     }
+    final def clone(extraDeps: Val_ *) : Instance =
+      constructor(params, deps union Val.Atom(this) union Val.deepUnion(extraDeps))
                   
     final override lazy val toString = {
       val build = new StringBuilder
@@ -131,10 +138,10 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   /** Should be the Instance constructor */
   protected[this] val constructor: (IParams, Val_) => self.Instance
   
-  protected final implicit def paramify(ps: (Symbol, Any)*) = immutable.Map(ps:_*)
+  protected[this] final implicit def paramify(ps: (Symbol, Any)*) = immutable.Map(ps:_*)
   
   /** Param -> (type, default if optional, constraint checker) */
-  private val iparamRegistry: mutable.Map[Symbol, IParamRegistryEntry[_<:Any]] = mutable.Map()
+  private[this] val iparamRegistry: mutable.Map[Symbol, IParamRegistryEntry[_<:Any]] = mutable.Map()
   private final case class IParamRegistryEntry[T](
     manifest: ClassManifest[T],
     default: Option[Either[() => _<:T, T]],

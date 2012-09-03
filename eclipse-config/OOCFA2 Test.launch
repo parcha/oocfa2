@@ -2,17 +2,17 @@
 <launchConfiguration type="scala.application">
 <stringAttribute key="bad_container_name" value="/oocfa2/eclipse-config/oocfa2-tes"/>
 <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
-<listEntry value="/oocfa2"/>
+<listEntry value="/oocfa2/src/com/android/dx/cfa2/test/CFA2Test.scala"/>
 </listAttribute>
 <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">
-<listEntry value="4"/>
+<listEntry value="1"/>
 </listAttribute>
 <stringAttribute key="org.eclipse.debug.ui.ATTR_CAPTURE_IN_FILE" value="${workspace_loc:/oocfa2}/test.log"/>
 <listAttribute key="org.eclipse.debug.ui.favoriteGroups">
 <listEntry value="org.eclipse.debug.ui.launchGroup.debug"/>
 </listAttribute>
 <booleanAttribute key="org.eclipse.jdt.debug.ui.CONSIDER_INHERITED_MAIN" value="true"/>
-<stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="com.android.dx.cfa2.CFA2Test"/>
+<stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="com.android.dx.cfa2.test.CFA2Test"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--optimize=devtest --scope=unit --no-locals --no-strict NotesList.class NoteEditor.class NoteEditor$LinedEditText.class NotePad.class NotePad$NoteColumns.class NotesLiveFolder.class NotePadProvider.class NotePadProvider$DatabaseHelper.class R.class R$attr.class R$drawable.class R$id.class R$layout.class R$menu.class R$string.class TitleEditor.class"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="oocfa2"/>
 <stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-ea -Xmx1g -Xss2m&#10;-XX:+UseThreadPriorities&#10;-XX:+UseFastAccessorMethods&#10;-XX:+UseFastEmptyMethods&#10;-XX:+UseSSE42Intrinsics&#10;-XX:+UseCompressedOops&#10;-XX:+DoEscapeAnalysis"/>

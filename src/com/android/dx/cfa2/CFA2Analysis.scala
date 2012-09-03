@@ -34,6 +34,8 @@ object CFA2Analysis {
     val debug: Boolean = true
     // In seconds
     val timeout: Long = 60
+    val recursionFuel = 2
+    val loopingFuel = 0
     val log = {
       def mk(sym: Symbol, primary: Logger) = {
         val toFile = new FileLogger(sym.name+".log")
@@ -65,58 +67,64 @@ object CFA2Analysis {
   final case class Results() extends Immutable
   
   type EncodedTrace = scala.Array[Int]
-  type TracerRepr = immutable.Vector[BB]
-  final class Tracer(val self: TracerRepr)
-  extends SeqProxyLike[BB, TracerRepr] with Immutable with NotNull with Serializable {
-    def dominates(t:Tracer) : Boolean =
+  type TracerRepr[E] = immutable.Vector[E]
+  final class Tracer[E](val self: TracerRepr[E])
+  extends SeqProxyLike[E, TracerRepr[E]] with Immutable with NotNull with Serializable {
+    def dominates(t:Tracer[E]) : Boolean =
       if(t.length > length) false
       else this endsWith(t)
     
     /** Trace from after last occurrence of bb */
-    def header(bb:BB) = {
-      require(contains(bb))
-      slice(lastIndexOf(bb), length)
+    def header(e:E) = {
+      require(contains(e))
+      slice(lastIndexOf(e), length)
     }
-    lazy val preheader = slice(lastIndexOf(last, length-2), length-1)
+    lazy val preheader = if(!isEmpty) slice(lastIndexOf(last, length-2), length-1)
+                         else         immutable.Vector.empty // TODO: Abstract using TracerRepr
     
     def encode : EncodedTrace = {
       val encoded = new mutable.ArrayBuilder.ofInt()
-      for(bb <- this)
-        encoded += bb.hashCode
+      for(e <- this)
+        encoded += e.hashCode
       encoded result
     }
     // For SeqProxyLike
     def seq = self
-    protected[this] def newBuilder = new immutable.VectorBuilder[BB]
+    protected[this] def newBuilder = new immutable.VectorBuilder[E]
+    
+    override def toString = mkString("[", " ~ ", "]")
   }
   object Tracer {
-    implicit def wrap(raw: TracerRepr) = new Tracer(raw)
-    implicit def unwrap(t: Tracer): TracerRepr = t.self
-    def apply(raw: TracerRepr = immutable.Vector()) = wrap(raw)
+    implicit def wrap[E](raw: TracerRepr[E]) = new Tracer(raw)
+    implicit def unwrap[E](t: Tracer[E]): TracerRepr[E] = t.self
+    def apply[E](raw: TracerRepr[E] = immutable.Vector()) = wrap(raw)
     
-    final class Builder extends mutable.Builder[BB, Tracer] {
-      protected val builder = new immutable.VectorBuilder[BB]()
-      def += (bb: BB) = { builder += bb; this }
+    final class Builder[E] extends mutable.Builder[E, Tracer[E]] {
+      protected val builder = new immutable.VectorBuilder[E]()
+      def += (e: E) = { builder += e; this }
       def clear = { builder; this }
-      def result = new Tracer(builder.result)
+      def result = new Tracer[E](builder.result)
     }
   }
   
-  type BBIndex = Tracer
-  final case class BBSummary(static_env_out: StaticEnv,
-                             tracef_out: TraceFrame,
-                             heap_out: HeapEnv.M,
-                             uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
-  type BBSummaries = MutableConcurrentMap[BB, MutableConcurrentMap[BBIndex, BBSummary]]
+  type BBTracer = Tracer[BB]
+  final case class BBEffect(static_env_out: StaticEnv,
+                            tracef_out: TraceFrame,
+                            heap_out: HeapEnv.M,
+                            uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
+  type BBEffects = MutableConcurrentMap[BB, MutableConcurrentMap[BBTracer, BBEffect]]
   
+  type FTracer = Tracer[Method]
+  final case class FEffect(static_env_out: StaticEnv) extends Immutable with NotNull
+  type FEffects = MutableConcurrentMap[Method, MutableConcurrentMap[FTracer, FEffect]]
+  
+  // TODO: Let's migrate to a proper database at some point...
   final case class FIndex(static_env: StaticEnv,
                           params: Seq[Val[SUBT[Instantiable]]]) extends Immutable
   final case class FSummary(uncaught_throws: MutableConcurrentMultiMap[EncodedTrace, Exceptional],
                             rets: MutableConcurrentMap[EncodedTrace, RetVal]) extends Immutable with NotNull
   type FSummaries = MutableConcurrentMap[Method, MutableConcurrentMap[FIndex, FSummary]]
                             
-  //final case class TracedExceptional(v: VAL[Exceptional]) extends Exception
-  
   /**
    * To keep "hidden" state in between two or more instruction evaluations or BBs
    * Wrt BBs, we assume that there can be no difference in eval state across two branches; e.g.
@@ -135,7 +143,7 @@ object CFA2Analysis {
   }
   
   final case class BBTrace(bb: BB,
-                          tracer : Tracer,
+                          tracer : BBTracer,
                           _eval_state: BBEvalState,
                           _static_env: StaticEnv, _tracef: TraceFrame) extends Immutable with NotNull
   
@@ -152,6 +160,28 @@ object CFA2Analysis {
     val None, Init, Step, CleanupStart, CleanupDone = Value
   }
   type TracePhase = TracePhase.Value
+  def advancePhase[E](phase: TracePhase, trace: Tracer[E], fuel: Int,
+                      logger: Logger = null) = {
+    def log(s: String) = if(logger != null) logger(s)
+    phase match {
+      case TracePhase.Init =>
+        log("STEPPING PHASE [0]")
+        TracePhase.Step
+      case TracePhase.Step =>
+        val step = trace.count(_ == trace.last) 
+        if(step > fuel) {
+          log("START CLEANUP PHASE")
+          TracePhase.CleanupStart
+        }
+        else {
+          log("STEPPING PHASE ["+step+"]")
+          TracePhase.Step
+        }
+      case TracePhase.CleanupStart =>
+        log("END CLEANUP PHASE")
+        TracePhase.CleanupDone
+    }
+  }
   
   def run(contexts: java.lang.Iterable[Context], opts: Opts) = {
     (new CFA2Analysis(contexts, opts)).run
@@ -177,6 +207,9 @@ object CFA2Analysis {
  * TODO:
  * * We have analyzed all of the Android standard libraries, thus allowing us to have a
  *   pseudo-whole-program view, also including the above assumption.
+ *   
+ * FIXME:
+ * * We don't execute the static initialization code for classes once they're "loaded" 
  */
 final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] val opts:Opts) extends Optimizer {
   import CFA2Analysis._
@@ -297,7 +330,10 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                               trace: EncodedTrace,
                               ret: RetVal) : Unit = {
     prep_summarize(m, index)
-    log('debug) ("Summarizing "+(m, index, trace, ret))
+    log('debug) ("Summarizing "+m+":\n"+
+                 "\tIndex:  "+index+"\n"+
+                 "\tTrace:  "+trace+"\n"+
+                 "\tRetval: "+ret)
     val rets = fsummaries(m)(index).rets
     if(!rets.contains(trace))
       rets += ((trace, ret))
@@ -322,7 +358,15 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       val throws = new MutableConcurrentMultiMap[EncodedTrace, Exceptional]
       fsummaries(m)(index) = FSummary(throws, rets)
     }
-    index
+  }
+  
+  private[this] val feffects = new FEffects
+  private[this] def faffect(m: Method, trace: FTracer,
+                            static_env_out: StaticEnv) = {
+    if(!feffects.contains(m))
+      feffects += ((m, new MutableConcurrentMap))
+    val effect = FEffect(static_env_out)
+    feffects(m) += ((trace, effect)) 
   }
   
   /*
@@ -352,44 +396,73 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
      */
     //val futures =
     for(meth <- methodMap.seq.keys
-        if /*meth != main &&*/
-        isAccessible(meth))
+        if isAccessible(meth))
       /*yield future(*/eval(meth)//)
     
     //awaitAll(opts.timeout*1000, futures.toSeq:_*)
+    log('debug) ("\n\n******************** Done!");
   }
   
   private[this] def eval(start: Method) = {
     log('info) ("\nEvaluating "+start)
-    val static_env = new SFEnv()
-    // NOTE: Also takes care of any implicit this param
-    val paramTs = start.getEffectiveDescriptor().getParameterTypes()
-    // Params are by definition instantiable
-    val params = makeUnknowns(Type(paramTs).asInstanceOf[Seq[Instantiable]])
-    trace(start, static_env, List.empty, params:_*)
-  }
+    
+    {
+      val static_env = new SFEnv()
+      // NOTE: Also takes care of any implicit this param
+      val paramTs = start.getEffectiveDescriptor().getParameterTypes()
+      // Params are by definition instantiable
+      val params = makeUnknowns(Type(paramTs).asInstanceOf[Seq[Instantiable]])
+      trace(start, Tracer(), new MutableConcurrentMap[FTracer, TracePhase], static_env, params:_*)(Val.Bottom)
+    }
   
-  private[this] def trace(meth: Method,
-                          static_env: StaticEnv,
-                          recursiveStack: List[FIndex],
-                          params: Val[SUBT[Instantiable]]*) : FSummary = {
-    log('debug) ("\nTracing "+meth+" ["+recursiveStack.size+"]")
+  /**
+   * Here we guard against recursion and catch summaries
+   */
+  def trace(meth: Method,
+            mtracer: FTracer,
+            mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
+            _static_env: StaticEnv,
+            params: Val[SUBT[Instantiable]]*)
+            (implicit cdeps: Val_): FSummary = {
+    log('debug) ("\nTracing "+meth+" ["+mtracer.count(_ == meth)+"/"+mtracer.size+"]")
+    
+    var static_env = _static_env
+    
+    val header = mtracer.preheader :+ meth
+    val phase = mtracePhases getOrElse (header, TracePhase.Init)
+    log('debug) ("MPhase is: "+phase)
+    
+    if(phase > TracePhase.Init &&
+       mtracer.contains(meth)) {
+      assert(phase < TracePhase.CleanupDone)
+      phase match {
+        case TracePhase.Step =>
+          faffect(meth, header, static_env)
+        case TracePhase.CleanupStart =>
+          val lastEffect = feffects(meth)(header)
+          static_env = static_env ++# (static_env induceUnknowns lastEffect.static_env_out)
+          log('debug) ("Induced unknowns for recursion cleanup")
+          faffect(meth, header, static_env)
+      }
+    }
+    
+    mtracePhases(header) = advancePhase(phase, mtracer, opts.loopingFuel, log('debug))
     
     log('debug) ("Params: "+params)
     //log out meth.dump
     val findex = FIndex(static_env, params)
     if(fsummaries contains meth)
       fsummaries(meth) get findex match {
-        case Some(summs) =>
-          log('debug) ("Found summary: "+meth+": \t"+summs)
-          return summs
-        case None        =>
+        case Some(summ) =>
+          log('debug) ("Found summary: "+meth+": \t"+summ)
+          return summ
+        case None       =>
       }
     
     // We're about to dive down a level; free up some memory
     System.gc()
     // Start method trace
-    return mtrace(meth, findex, recursiveStack)
+    return trace_(meth, mtracer, mtracePhases, Val.Bottom, findex)
   }
   
   /**
@@ -398,34 +471,40 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
    * We might as well just keep it for the internal method trace (to e.g. avoid loops).
    */
   @inline
-  private[this] def mtrace(meth: Method, findex: FIndex, recursiveStack: List[FIndex]) : FSummary = {
+  def trace_(meth: Method,
+             _mtracer: FTracer,
+             mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
+             cdeps: Val_,
+             findex: FIndex): FSummary = {
     assert(meth.arity == findex.params.length)
     
-    val bbsummaries = new BBSummaries()
+    val mtracer = _mtracer :+ meth
+    log('debug) ("MTracer: "+mtracer)
+    
+    val bbeffects = new BBEffects()
     @inline
-    def bbsummarize(bb: BB,
-                                  trace: Tracer,
-                                  static_env_out: StaticEnv,
-                                  tracef_out: TraceFrame,
-                                  heap_out: HeapEnv.M,
-                                  uncaught_out: immutable.Set[Exceptional]) {
-      if(!bbsummaries.contains(bb))
-        bbsummaries += ((bb, new MutableConcurrentMap))
-      val index = trace
-      val summary = BBSummary(static_env_out, tracef_out, heap_out, uncaught_out)
-      bbsummaries(bb) += ((index, summary))
+    def bbaffect(bb: BB, trace: BBTracer,
+                 static_env_out: StaticEnv,
+                 tracef_out: TraceFrame,
+                 heap_out: HeapEnv.M,
+                 uncaught_out: immutable.Set[Exceptional]) {
+      if(!bbeffects.contains(bb))
+        bbeffects += ((bb, new MutableConcurrentMap))
+      val effect = BBEffect(static_env_out, tracef_out, heap_out, uncaught_out)
+      bbeffects(bb) += ((trace, effect))
     }
     
-    val tracePhases = new MutableConcurrentMap[Tracer, TracePhase]
+    val bbtracePhases = new MutableConcurrentMap[BBTracer, TracePhase]
   
   def trace_bb(bb: BB,
-               _tracer : Tracer, _uncaught : immutable.Set[Exceptional],
+               _bbtracer : BBTracer, _uncaught : immutable.Set[Exceptional],
                _eval_state: BBEvalState,
-               _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv.M) : Unit = {
-    log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_tracer.length+"]")
+               _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv.M)
+              (implicit cdeps: Val_): Unit = {
+    log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
     
-    val tracer = _tracer :+ bb
-    log('debug) ("Tracer: "+tracer)
+    val bbtracer = _bbtracer :+ bb
+    log('debug) ("BBTracer: "+bbtracer)
     
     var static_env = _static_env
     log('debug) ("Static env: "+static_env)
@@ -453,7 +532,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     }
     @inline
     def take_retval = {
-      val r = eval_state.retval; update_retval(null);
+      val r = eval_state.retval; update_retval(Val.Bottom);
       assert(r != null); r
     }
     @inline
@@ -461,13 +540,13 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     // Can return null
     @inline
     def take_error = {
-      val e = eval_state.error; update_error(null); e
+      val e = eval_state.error; update_error(Val.Bottom); e
     }
     @inline
     def update_error(e: Val[Exceptional]) = eval_state = eval_state.update(error_ = e)
     @inline
     def take_pseudo = {
-      val p = eval_state.pseudo; update_pseudo(null);
+      val p = eval_state.pseudo; update_pseudo(Val.Bottom);
       assert(p != null); p
     }
     @inline
@@ -479,18 +558,18 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       Val.Unknown(reg.typ)
     })
     @inline
-    def fsummarize_r(ret: RetVal) = summarize(meth, findex, tracer encode, ret)
+    def fsummarize_r(ret: RetVal) = summarize(meth, findex, bbtracer encode, ret)
     @inline
-    def fsummarize_u(uncaught: Exceptional*) = summarize(meth, findex, tracer encode, uncaught)
+    def fsummarize_u(uncaught: Exceptional*) = summarize(meth, findex, bbtracer encode, uncaught)
     
-    var result :Val_ = null
+    var result :Val_ = Val.Bottom
     val insns = bb.getInsns
     // All but the branching instruction
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !ins.opcode.isInstanceOf[Branches]) {
       log('debug) (ins.toHuman)
-      /*
+      /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
        * TODO:
        * * If we call a function that we can't trace, it could write to any mutable static fields,
@@ -549,8 +628,9 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
             case MOVE_PARAM         => findex.params(take_param_index)
             case MOVE_EXCEPTION     => take_error match {
                 // FIXME: We couldn't track the exceptional
-                case null => Val.Unknown(resultT)
-                case e    => e
+                case Val.Top    => Val.Unknown(resultT)
+                case Val.Bottom => assert(false); Val.Bottom //shouldn't happen...
+                case e          => e
               }
             case MOVE_RESULT         => take_retval
             case MOVE_RESULT_PSEUDO  => take_pseudo
@@ -629,11 +709,11 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
           val typ = Type(cst.asInstanceOf[CstType].getClassType).asInstanceOf[RefType]
           result = code match {
             case NEW_INSTANCE     => Val.Atom(typ.instance())
-            // TODO
             case NEW_ARRAY        => {
               val atyp = typ.asInstanceOf[Instantiable#Array]
               Val.Atom(atyp.instance(Val.Bottom, ('length, operands(0))))
             }
+            // TODO
             case FILLED_NEW_ARRAY => {
               log('info) ("FILLED_NEW_ARRAY\n"+
                            ins+"\n"+
@@ -736,43 +816,28 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
           @inline
           def call_known(m: Method, retT: Instantiable) = {
             var static_env_ = static_env
-            var recursiveStack_ : List[FIndex] = List.empty
             var params = mkparams(operands).toSeq
-            
-            // Guard against a recursive call
-            if(m == meth)
-              // Check for sentinel telling us we were cleaning up
-              if(!recursiveStack.isEmpty && recursiveStack.head == null) {
-                // TODO
-              }
-              else {
-                // Have we reached a stop condition?
-                if((recursiveStack contains findex) ||
-                   recursiveStack.size > 100) {
-                  log('debug) ("Reached stop condition for recursively calling "+meth+", having used "+findex)
-                  static_env_ = static_env ++# static_env.induceUnknowns(_static_env)
-                  recursiveStack_ = null +: recursiveStack
-                  // TODO: params?
-                }
-                // We're not stopping yet; push our index onto the stack
-                else {
-                  log('debug) ("Recursively calling "+meth+" using "+findex)
-                  recursiveStack_ = findex +: recursiveStack
-                }
-              }
-            else
-              log('debug) ("Non-recursive call from "+meth+" to "+m)
-            //try {
-            
-            var result = trace(m, static_env_, recursiveStack_, params:_*)
-            HOOK(opts.kmethod_hooks, (spec, params, result), {result = _:FSummary})
-            eval_summary(result)
-            /*}
-            catch {
-              case e:StackOverflowError =>
-                log('warn) ("Stack overflow when attempting to call "+m+" from "+meth)
+            val next_header = (mtracer.preheader :+ m).preheader :+ m
+            val next_phase = mtracePhases get next_header
+            next_phase match {
+              case Some(TracePhase.CleanupDone) =>
+                log('debug) ("Redundant trace; not calling: "+next_header)
+                // TODO: actually refine this to use the propagated unknowns
+                // though it may be the case that we eventually reach a fixed-point
+                // of induced unknowns via summarization...
                 call_unknown(retT)
-            }*/
+              case _ =>
+                try {
+                  var sum = trace(m, mtracer, mtracePhases, static_env_, params:_*)
+                  HOOK(opts.kmethod_hooks, (spec, params, sum), {sum = _:FSummary})
+                  eval_summary(sum)
+                }
+                catch {
+                  case e:StackOverflowError =>
+            	    log('warn) ("Stack overflow when attempting to call "+m+" from "+meth)
+            	    call_unknown(retT)
+                }
+            }
           }
           
           code match {
@@ -782,6 +847,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                 case None  => call_unknown(retT)
                 case Some(m) => call_known(m, retT)
               }
+            // FIXME: INVOKE_SUPER needs to actually call the super-method
             case _ => {
               val typ = Type(spec.getDefiningClass.getClassType).asInstanceOf[OBJECT]
               val vobj = operands.head.asInstanceOf[Val[typ.type]]
@@ -790,6 +856,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
               //assert(vobj.asSet forall (_.typ < typ == Tri.T))
               val proto = spec.getPrototype.withFirstParameter(typ.raw)
               val retT = Type(proto.getReturnType).asInstanceOf[Instantiable]
+              
               // Can we dynamically lift this method?
               if(Dynamic.isLiftableCall(spec, vobj, operands.tail:_*)) {
                 log('debug) ("Lifting call to "+spec.getNat.getName.getString)
@@ -817,7 +884,12 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       // Assign phase
       if(!ins.opcode.isInstanceOf[NoResult] && sink != None) {
         assert(result != null)
-        tracef = tracef +# (sink.get, result)
+        def dependize[T <: Instantiable](v: VAL[T]): VAL[T] = v match {
+          case v.typ.Unknown => v
+          case v_ : T#Instance => v_.clone(cdeps)
+        }
+        def dependize_(v: VAL_) = dependize[Instantiable](v)
+        tracef = tracef +# (sink.get, result eval dependize_)
       }
       if(sink != None)
         assert(result != null)
@@ -842,7 +914,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     if(bb.successors.size == 1) {
       // We may be implicitly branching for a catch; get ready for a move-result-pseudo
       update_pseudo(result)
-      return trace_bb(bb.successors.head, tracer, uncaught, eval_state, static_env, tracef, heap)
+      return trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
     }
     else br.opcode match {
       // No successors
@@ -878,36 +950,39 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
         var heap_ = heap
         var uncaught_ = uncaught
         
-        val header = tracer.preheader :+ bb
-        var phase = tracePhases getOrElse (header, {
+        val header = bbtracer.preheader :+ bb
+        var phase = bbtracePhases getOrElse (header, {
           if(bb.mayLoop) TracePhase.Init
           else TracePhase.None
         })
-        log('debug) ("Phase is: "+phase)
+        log('debug) ("BBPhase is: "+phase)
+        
         // If we're in an applicable phase, are a join point, and have looped...
         if(phase > TracePhase.Init &&
-           bb.predecessors.size > 1 && _tracer.contains(bb)) {
+           bb.predecessors.size > 1 && _bbtracer.contains(bb)) {
           assert(phase < TracePhase.CleanupDone)
           phase match {
             case TracePhase.Step =>
-              bbsummarize(bb, header, static_env_, tracef_, heap_, uncaught_)
+              bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupStart =>
-              val lastSumm = bbsummaries(bb)(header)
-              static_env_ = static_env ++# (static_env induceUnknowns lastSumm.static_env_out)
-              tracef_ = tracef ++# (tracef induceUnknowns lastSumm.tracef_out)
-              heap_ = heap ++# (heap induceUnknowns lastSumm.heap_out)
+              val lastEffect = bbeffects(bb)(header)
+              static_env_ = static_env ++# (static_env induceUnknowns lastEffect.static_env_out)
+              tracef_ = tracef ++# (tracef induceUnknowns lastEffect.tracef_out)
+              heap_ = heap ++# (heap induceUnknowns lastEffect.heap_out)
               // TODO what about uncaught?
-              log('debug) ("Induced unknowns for cleanup")
-              bbsummarize(bb, header, static_env_, tracef_, heap_, uncaught_)
+              log('debug) ("Induced unknowns for looping cleanup")
+              bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
           }
         }
-        if(phase == TracePhase.Init)
-          tracePhases(header) = TracePhase.Step
-        // Register final BBSummary
-        /*if(phase != TracePhase.None)
-          bbsummarize(bb, tracer, static_env_, tracef_, heap_, uncaught_)*/
         
-        val reach = mutable.Map[BB, TraceFrame]()
+        if(phase != TracePhase.None)
+          bbtracePhases(header) = advancePhase(phase, bbtracer, opts.loopingFuel, log('debug))
+        
+        /** Used to refine the environment based on the path */
+        final case class BranchMonad(tracef: TraceFrame = tracef_,
+                                     cdeps: Val_ = cdeps) extends Immutable with NotNull
+        
+        val reach = mutable.Map[BB, BranchMonad]()
         // Test for successors of bb which could possibly be reached (given tracef_ and static_env_)
         
         // Do we catch a thrown exception?
@@ -924,7 +999,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                   if(tri == Tri.T)
                     uncaught -= u
               }
-          if(catches) reach += ((bb.alt_succ, tracef_))
+          if(catches) reach += ((bb.alt_succ, BranchMonad()))
         }
         
         // Handle branches (except for End-branches, which we did above)
@@ -947,8 +1022,11 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                   case INT       => Val.Atom(INT.ZERO)
                   case _:RefType => Val.Atom(NULL.singleton)
                 }
-              val primSet: mutable.Set[VAL_] = mutable.Set() // Along bb.prim_succ
-              val altSet: mutable.Set[VAL_] = mutable.Set() // Along bb.alt_succ
+              val primSet1: mutable.Set[VAL_] = mutable.Set() // Along bb.prim_succ
+              val primSet2: mutable.Set[VAL_] = mutable.Set()
+              val altSet1: mutable.Set[VAL_] = mutable.Set() // Along bb.alt_succ
+              val altSet2: mutable.Set[VAL_] = mutable.Set()
+              
               for(a <- va.asSet;
                   b <- vb.asSet) {
                 val result =
@@ -964,46 +1042,68 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                     Tri.liftBoolean(code match {
                       case IF_EQ => ia == ib
                       case IF_NE => ia != ib
-                      case IF_LT => ia < ib
+                      case IF_LT => ia <  ib
                       case IF_LE => ia <= ib
-                      case IF_GT => ia > ib
+                      case IF_GT => ia >  ib
                       case IF_GE => ia >= ib
                     })
                 }
-                def compileSet(set: mutable.Set[VAL_]) = {
-                  set += a
-                  if(operands.length == 2) set += b
+                def compileSet(taken: Boolean): Unit = {
+                  val set1 = if(taken) primSet1
+                             else      altSet1
+                  set1 += a
+                  if(operands.length == 2) {
+                    val set2 = if(taken) primSet2
+                               else      altSet2
+                    set2 += b
+                  }
                 }
                 result match {
-                  case Tri.T => compileSet(primSet)
-                  case Tri.F => compileSet(altSet)
-                  case Tri.U => compileSet(primSet); compileSet(altSet)
+                  case Tri.T => compileSet(true)
+                  case Tri.F => compileSet(false)
+                  case Tri.U => compileSet(true); compileSet(false)
                 }
               }
-              def refineBranch(vset: Set[VAL_]): TraceFrame = {
+              
+              /* 
+               * TODO: How we should actually refine this is that each VAL should be
+               * uniquely tracked, and thus we can go over all such values in the statespace
+               * and remove them as an impossibility if they don't exist on a branch.
+               */
+              def refineBranch(taken: Boolean): BranchMonad = {
+                val vset1 = if(taken) primSet1
+                            else      altSet1
+                val vset2 = if(taken) primSet2
+                            else      altSet2
+                def refineRegister(kv: (Var.Register_, Val_)) : Val_ = kv match {
+                  case (k, _) if k == srcs(0) =>
+                    Val(vset1)
+                  case (k, _) if operands.length == 2 && k == srcs(1) =>
+                    Val(vset2)
+                }
                 // TODO: do the same for static env
-                tracef_ ++ tracef_ flatMap (kv => {
-                  val (k, vs) = kv
-                  val inter = vs.asSet & vset
-                  inter.size match {
-                    /* TODO: Shouldn't it be true that if the value is entirely excluded, it isn't used on the branch?
-                             There are failure cases for this, but I've yet to determine why...*/
-                    case 0 | vs.size => None 
-                    case _ => Some(k, Val(vs.asSet diff inter))
-                  }
-                })
+                var tracef: TraceFrame = tracef_ +# (srcs(0), Val(vset1))
+                var cdeps_ = Val(vset1) union cdeps
+                if(operands.length == 2) {
+                  tracef = tracef +# (srcs(1), Val(vset2))
+                  cdeps_ = Val(vset2) union cdeps
+                }
+                BranchMonad(tracef, cdeps_)
               }
-              if(!(primSet isEmpty)) reach += ((bb.prim_succ, refineBranch(primSet)))
+              
+              if(!(primSet1 isEmpty)) reach += ((bb.prim_succ, refineBranch(true)))
               else log('debug) ("True branch not taken")
-              if(!(altSet isEmpty)) reach += ((bb.alt_succ, refineBranch(altSet)))
+              if(!(altSet1 isEmpty)) reach += ((bb.alt_succ, refineBranch(false)))
               else log('debug) ("False branch not taken")
+              //End IF
             
             case SWITCH => //TODO
               log('info) ("SWITCH\n"+
                            br+"\n"+
                            srcs+"\n"+
                            operands)
-              reach ++= (bb.successors map ((_, tracef_)))
+              val bm = BranchMonad() //FIXME: At least need to make cdeps appropriate
+              reach ++= (bb.successors map ((_, bm)))
           }
         }
         log('debug) ("Can reach: "+reach+" out of "+bb.successors)
@@ -1015,12 +1115,12 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
         }
         val branch_set =
           if(phase < TracePhase.Step) reach.keys
-          else if(phase == TracePhase.CleanupDone) immutable.Set()
+          else if(phase == TracePhase.CleanupDone) immutable.Set() // We're done, so stop
           else {
           val tmp: mutable.Set[BB] = mutable.Set()
           for(s <- reach.keys) {
             val redundant =
-              if(!(tracer contains s)) false
+              if(!(bbtracer contains s)) false
               // We've looped at least once
               else {
                 /* Scout ahead to figure out if there is even a possible non-redundant path ahead of us.
@@ -1028,11 +1128,11 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                  * which has not yet been finalized?
                  */
                 val seen: mutable.Set[BB] = mutable.Set()
-                def isWorthWhile(bb: BB, _trace: Tracer) : Boolean = {
+                def isWorthWhile(bb: BB, _trace: BBTracer) : Boolean = {
                   val trace = _trace :+ bb
                   val header = trace.preheader :+ bb
                   if(bb == s /*&& _trace != tracer*/)
-                    tracePhases get header match {
+                    bbtracePhases get header match {
                       case Some(p) => p < TracePhase.CleanupDone
                       case None    => true
                     }
@@ -1042,23 +1142,17 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                     bb.successors.isEmpty || (bb.successors exists (isWorthWhile(_, trace)))
                   }
                 }
-                isWorthWhile(s, tracer)
+                isWorthWhile(s, bbtracer)
               }
             
             if(!redundant) tmp += s
             else {
-              val header = (tracer :+ s).preheader :+ s
-              tracePhases.get(header) match {
-                case None =>
-                  log('debug) ("Redundant trace; not taking: "+ header)
-                case Some(TracePhase.Step) =>
-                  log('debug) ("Redundant trace; starting cleanup: "+header)
-                  tracePhases(header) = TracePhase.CleanupStart
+              val next_header = (bbtracer :+ s).preheader :+ s
+              bbtracePhases get next_header match {
+                case Some(TracePhase.Step) | Some(TracePhase.CleanupStart) =>
                   tmp += s
-                case Some(TracePhase.CleanupStart) =>
-                  log('debug) ("Ending cleanup along: "+header)
-                  tracePhases(header) = TracePhase.CleanupDone
-                  tmp += s
+                case _ =>
+                  log('debug) ("Redundant trace; not taking: "+ next_header)
               }
             }
           }
@@ -1068,7 +1162,12 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
         
         //val futures =
           for(s <- branch_set)
-            /*yield future(*/trace_bb(s, tracer, uncaught_, eval_state, static_env_, reach(s), heap_)//)
+            /*yield future(*/trace_bb(s, bbtracer,
+                                      uncaught_,
+                                      eval_state,
+                                      static_env_,
+                                      reach(s).tracef,
+                                      heap_)(reach(s).cdeps)//)
         
         //awaitAll(opts.timeout*1000, futures.toSeq:_*)
         return
@@ -1078,11 +1177,13 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   
   trace_bb(meth.firstBlock,
            Tracer(), immutable.Set(),
-           BBEvalState(0, null, null, null),
-           findex.static_env, new TraceFrame, HeapEnv.defaultM)//.result
+           BBEvalState(0, Val.Bottom, Val.Bottom, Val.Bottom),
+           findex.static_env, new TraceFrame, HeapEnv.defaultM)(cdeps)//.result
   assert((fsummaries contains meth) && (fsummaries(meth) contains findex))
   
   return fsummaries(meth)(findex)
-  } // End mtrace
+  } // End trace_
+  
+  } // End eval
 
 }

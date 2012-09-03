@@ -1,7 +1,7 @@
-package com.android.dx.cfa2
+package com.android.dx.cfa2.test
 
-import com.android.dx
-import dx.opt.{OptimizationContext => Context, _}
+import com.android.dx.opt.{OptimizationContext => Context, _}
+import com.android.dx.cfa2.CFA2Analysis
 
 object CFA2Factory extends OptimizerFactory[CFA2Analysis] {
 

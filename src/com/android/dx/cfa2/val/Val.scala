@@ -14,7 +14,7 @@ import immutable._
 import parallel.immutable._
 
 sealed abstract class Val[+T <: Instantiable]
-extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable {
+extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable with NotNull{
   import Val._
   // TODO: Allow us to infer/capture the LUB of the typs of these vals
   final type Type = T
@@ -107,8 +107,12 @@ object Val {
   
   def union[T1 <: Join, T2 <: Join, Join <: Instantiable]
            (v1: Val[T1], v2:Val[T2]) : Val[Join] = {
-    val u = v1.asSet ++ v2.asSet
-    apply(u)
+    if(v1 == Val.Top || v2 == Val.Top)
+      Val.Top
+    else {
+      val u = v1.asSet ++ v2.asSet
+      apply(u)
+    }
   }
   
   def deepUnion[Join <: Instantiable]
