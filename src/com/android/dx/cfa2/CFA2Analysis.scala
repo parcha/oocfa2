@@ -50,6 +50,8 @@ object CFA2Analysis {
       new Opts.Loggers(logs)
     }
     
+    val starting_points: Iterable[MethodIDer] = immutable.Seq(AccessibleMethodIDer)
+    
     // Hooks
     val instance_hooks: Iterable[InstanceHook] = immutable.Seq()
     val clone_hooks: Iterable[CloneHook] = immutable.Seq()
@@ -224,7 +226,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   import opts.log
   
   /* ====== Initialization ====== */
-  private[cfa2] val methodMap = {
+  protected[cfa2] val methodMap = {
     val build = {
       type Builder = mutable.MapBuilder[Method, Context, par.immutable.ParMap[Method, Context]]
       new Builder(par.immutable.ParMap()) {
@@ -239,7 +241,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       }
     build result
   }
-  private[cfa2] val dataMap = {
+  protected[cfa2] val dataMap = {
     val build = {
       type Builder = mutable.MapBuilder[Method, Context.Data, par.immutable.ParMap[Method, Context.Data]]
       new Builder(par.immutable.ParMap())
@@ -251,10 +253,10 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     }
     build result
   }
-  private[cfa2] val classes = (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_))
-  private[cfa2] val cdis = for(c <- classes) yield c.getCDI
+  protected[cfa2] val classes = (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_))
+  protected[cfa2] val cdis = for(c <- classes) yield c.getCDI
   /** Holds known IField slots */
-  private[cfa2] val ifieldMap = {
+  protected[cfa2] val ifieldMap = {
     val build = {
       type Builder = mutable.MapBuilder[IFieldSpec, FieldSlot.Known,
                                         par.immutable.ParMap[IFieldSpec, FieldSlot.Known]]
@@ -266,7 +268,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     build result
   }
   /** Holds known SField slots */
-  private[cfa2] val sfieldMap = {
+  protected[cfa2] val sfieldMap = {
     val build = {
       type Builder = mutable.MapBuilder[SFieldSpec, FieldSlot,
                                         par.immutable.ParMap[SFieldSpec, FieldSlot]]
@@ -370,6 +372,16 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   }
   
   /*
+   * TODO: Not threadsafe yet! Especially not for concurrently running evals
+   * E.g., we can't do STM, so we can't safely concurrently merge fsummaries
+   */
+  protected[this] type EvalWorklist = mutable.Map[Method, Boolean] 
+  protected[this] val eval_worklist: EvalWorklist = mutable.Map((
+      for(m <- methodMap.seq.keys
+          if opts.starting_points exists {_.identifies(m)})
+        yield (m, false)).toSeq :_*)
+  
+  /*
    *  TODO: What should be the return value here?
    *  Should it be summaries?
    *  Should it be a full execution graph?
@@ -381,25 +393,14 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     log('debug) ("\nMethods are:")
     for(m <- methodMap.seq.keys) log('debug) (m.toString)
     
-    def isAccessible(meth: Method) = {
-      def hasFinalClass = classForMethod(meth) match {
-        case Some(c) => Class(c) is Properties.Final
-        case None    => false // Conservative assumption
-      }
-      (meth is Properties.Public) ||
-      ((meth is Properties.Protected) && !hasFinalClass)
-    }
-    
-    /*
-     * Continue on to tracing starting with all the other externally accessible methods
-     * that haven't yet been evaluated (they weren't reached by main)
-     */
-    //val futures =
-    for(meth <- methodMap.seq.keys
-        if isAccessible(meth))
-      /*yield future(*/eval(meth)//)
-    
-    //awaitAll(opts.timeout*1000, futures.toSeq:_*)
+    var continue = true
+    do {
+      eval_worklist find {!_._2} match {
+        case Some((m, _)) => eval(m); eval_worklist(m) = true
+        case None         => continue = false
+      } 
+    } while(continue)
+      
     log('debug) ("\n\n******************** Done!");
   }
   

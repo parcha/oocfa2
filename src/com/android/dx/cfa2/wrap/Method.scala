@@ -23,10 +23,11 @@ final case class Method(val raw:Raw, val rop:RopMethod) extends Immutable with N
   
   def name = raw.getName.getString
   def arity = raw.getEffectiveDescriptor.getParameterTypes.size
+  def parent = raw.getDefiningClass
   def accessFlags = raw.getAccessFlags
   def attributes(attr: String) = raw.getAttributes.findFirst(attr)
   lazy val dump = rop.dump
-  override lazy val toString = name+"/"+arity+"@"+raw.getDefiningClass.toHuman
+  override lazy val toString = name+"/"+arity+"@"+parent.toHuman
 }
 object Method {
   def wrap(raw:Raw, rop:RopMethod) = new Method(raw, rop)
