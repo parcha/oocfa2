@@ -10,7 +10,22 @@ import prop.Properties._
 
 import scala.collection._
 
-final case class Method(val raw:Raw, val rop:RopMethod) extends Immutable with NotNull {
+sealed trait MethodDesc extends Immutable with NotNull {
+  final def name = nat.getName.getString
+  def prototype: dx.rop.`type`.Prototype
+  final def arity = prototype.getParameterTypes.size
+  final lazy val argTs =
+    for(i <- 0 until arity)
+      // TODO: Should this be ParameterFrameTypes?
+      yield cfa2.`val`.Type(prototype.getParameterTypes.get(i))
+  
+  def parent: dx.rop.cst.CstType
+  def nat: dx.rop.cst.CstNat
+  final lazy val isInstanceInit = nat.isInstanceInit
+  final lazy val isClassInit = nat.isClassInit
+}
+
+final case class Method(val raw:Raw, val rop:RopMethod) extends MethodDesc {
   lazy val blocks: BasicBlockSet = {
     val bbs = rop.getBlocks
     new BasicBlockSet(
@@ -18,18 +33,29 @@ final case class Method(val raw:Raw, val rop:RopMethod) extends Immutable with N
   }
   def firstBlock = blocks(rop.getFirstLabel)
   
-  lazy val props = prop.Range(prop.Domain.Method, raw.getAccessFlags)
+  lazy val props = prop.Range(prop.Domain.Method, accessFlags)
   def is(prop: Property*) = props contains(prop:_*)
-  
-  def name = raw.getName.getString
-  def arity = raw.getEffectiveDescriptor.getParameterTypes.size
   def parent = raw.getDefiningClass
   def accessFlags = raw.getAccessFlags
+  def prototype = raw.getEffectiveDescriptor
   def attributes(attr: String) = raw.getAttributes.findFirst(attr)
+  
+  def nat = raw.getNat
   lazy val dump = rop.dump
   override lazy val toString = name+"/"+arity+"@"+parent.toHuman
 }
 object Method {
   def wrap(raw:Raw, rop:RopMethod) = new Method(raw, rop)
   implicit def unwrap(m:Method) = m.raw
+}
+
+final case class GhostMethod(val spec:MethodSpec) extends MethodDesc {
+  // FIXME: we need a way to "getEffectiveDescriptor" here...
+  def prototype = spec.getPrototype
+  def parent = spec.getDefiningClass
+  def nat = spec.getNat
+}
+object GhostMethod {
+  implicit def wrap(spec:MethodSpec) = new GhostMethod(spec)
+  implicit def unwrap(gm:GhostMethod) = gm.spec
 }

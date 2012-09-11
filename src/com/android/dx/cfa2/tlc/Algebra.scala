@@ -18,7 +18,7 @@ object Algebra {
     type ^ = ![T]
   }
   // for convenience
-  type UNION[T] = { type | [S] = Disj[![T]]# | [S] }
+  type UNION[T] = { type | [+S] = Disj[![T]]# | [S] }
   
   /*trait Union [A <: U, B <: U, U] {
     protected val a:A

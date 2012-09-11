@@ -21,10 +21,10 @@ trait Registry[K, V <: AnyRef] extends mutable.Map[K, WeakReference[V]] with Ser
   def wasRegistered(k:K) = registered(k) == Was
 }
 object Registry {
-  sealed trait RegistrationStatus[+V]
-  final object Not extends RegistrationStatus[Nothing]
-  final object Was extends RegistrationStatus[Nothing]
-  final case class Is[V](v:V) extends RegistrationStatus[V]
+  sealed abstract class RegistrationStatus[+V]
+  final case object Not extends RegistrationStatus[Nothing]
+  final case object Was extends RegistrationStatus[Nothing]
+  final case class Is[+V](v:V) extends RegistrationStatus[V]
   
   implicit def optionize[V](stat:RegistrationStatus[V]) = stat match {
     case Not   => None

@@ -19,6 +19,7 @@ package object cfa2 {
     case c:CstKnownNull => Val.Atom(NULL.singleton)
   }
   
+  /* ======================== Parsing ================ */
   import scala.util.matching._
   /** Gleaned from empirical testing and VMSpec 2nd Ed section 4.3 **/
   val descriptorRegex = new Regex("(?x)^"+{
@@ -48,12 +49,28 @@ package object cfa2 {
   }+"$",
   "classname")
   
-  // HACK
-  def BREAK = {
-    //System.err.println("BREAK")
+  /* ============ Exceptions =================== */
+  /** This is an assertion/requirement stemming from reasonable program input/configuration **/
+  final class PresumptionException(msg: String, cause: Throwable = null) extends Exception(msg, cause)
+  
+  def presume(presumption: Boolean,
+              msg: =>String = "presumption failed") = {
+    if(!presumption)
+      throw new PresumptionException(msg)
   }
-  def REQBREAK = {
-    BREAK
+  
+  def presumably[E <: Exception](act: Unit=>Unit)
+                (implicit E_ : Manifest[E]) = presumably[E, Unit](act)
+  def presumably[E <: Exception, R](act: Unit=>R)
+                (implicit E_ : Manifest[E]): R = {
+    try {
+      act()
+    } catch {
+      case e:E =>
+        if(E_ >:> ClassManifest.fromClass(e.getClass))
+          throw new PresumptionException("presumption failed", e)
+        else throw e
+    }
   }
   
   /* ============= Interfacing with Java codebase ======== */
@@ -122,14 +139,14 @@ package object cfa2 {
   
   /* ============ Hooks ================== */
   import `val`.IParams
-  type Hook[Args, Ret] = Args => Option[Ret]  
+  type Hook[-Args, +Ret] = Args => Option[Ret]  
   type InstanceHook = Hook[(Instantiable, Val_, IParams),
                            IParams]
   type CloneHook = Hook[(Instantiable#Instance, Val_, IParams),
                         IParams]
   type UnknownMethodHook = Hook[(MethodSpec, Seq[Val_]),
                                 Val_]
-  type KnownMethodHook = Hook[(MethodSpec, Seq[Val_], CFA2Analysis.FSummary),
+  type KnownMethodHook = Hook[(wrap.Method, Seq[Val_], CFA2Analysis.FSummary),
                               CFA2Analysis.FSummary]
   
   def HOOK[Args, Ret, H <: Hook[Args, Ret]]

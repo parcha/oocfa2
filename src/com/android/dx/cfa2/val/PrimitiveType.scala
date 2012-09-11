@@ -6,8 +6,8 @@ import dx.rop.`type`.{Type => RawType, _}
 
 sealed trait PrimitiveType extends Instantiable {
   require(raw isPrimitive)
-  protected final override def << (t: Type) = false
-  protected final override def >> (t: Type) = false
+  protected final override def << (t: Type) = (super.<<(t)) | false
+  protected final override def >> (t: Type) = (super.>>(t)) | false
 }
 
 object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton {

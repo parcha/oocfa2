@@ -62,7 +62,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
    * reference itself is unknown.
    */
   trait Unknown extends self.Value
-  final object Unknown extends self.Value with self.Unknown {
+  final case object Unknown extends self.Value with self.Unknown {
     val isUnknown = true
     val deps = Val.Top
   }
@@ -111,7 +111,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
       def addMissingParams(ps: IParams) = params_ ++= (for((k,v) <- ps if!(params_ contains k)) yield (k,v))
       addMissingParams(params)
       
-      import CFA2Analysis.singleton.opts.clone_hooks
+      // FIXME: Hack
+      import CFA2Analysis.singleton.clone_hooks
       HOOK(clone_hooks, (this, deps_, params_), addMissingParams)
         
       constructor(params_, deps_)
@@ -213,7 +214,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
           build += ((p, v))
       }
     
-    import CFA2Analysis.singleton.opts.instance_hooks
+    //FIXME: HACK
+    import CFA2Analysis.singleton.instance_hooks
     HOOK(instance_hooks, (this, deps, params), {build ++= (_:IParams)})
         
     constructor(build.result, deps)

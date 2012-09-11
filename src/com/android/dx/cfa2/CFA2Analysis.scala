@@ -29,34 +29,27 @@ import scala.annotation.unchecked.uncheckedStable
 
 object CFA2Analysis {
   
-  class Opts protected[CFA2Analysis] () extends Immutable {
+  class Opts protected[CFA2Analysis] () extends Immutable with NotNull {
     val single_threaded: Boolean = false
     val debug: Boolean = true
     // In seconds
     val timeout: Long = 60
     val recursionFuel = 2
     val loopingFuel = 0
-    val log = {
-      def mk(sym: Symbol, primary: Logger) = {
-        val toFile = new FileLogger(sym.name+".log")
-        (sym, new DualLogger(primary, toFile))
-      }
-      val logs = immutable.Map(
-          mk('out, new PrintLogger(System.out)),
-          mk('info, new PrintLogger(System.err)),
-          mk('warn, new PrintLogger(System.err)),
-          mk('debug, new ConditionalLogger(debug, new PrintLogger(System.out))),
-          mk('error, new PrintLogger(System.err)))
-      new Opts.Loggers(logs)
+    
+    protected def mkLog(sym: Symbol, primary: Logger) = {
+      val toFile = new FileLogger(sym.name+".log")
+      (sym, new DualLogger(primary, toFile))
     }
+    protected[this] val logs = immutable.Map(
+      mkLog('out, new PrintLogger(System.out)),
+      mkLog('info, new PrintLogger(System.err)),
+      mkLog('warn, new PrintLogger(System.err)),
+      mkLog('debug, new ConditionalLogger(debug, new PrintLogger(System.out))),
+      mkLog('error, new PrintLogger(System.err)))
+    val log = new Opts.Loggers(logs)
     
-    val starting_points: Iterable[MethodIDer] = immutable.Seq(AccessibleMethodIDer)
-    
-    // Hooks
-    val instance_hooks: Iterable[InstanceHook] = immutable.Seq()
-    val clone_hooks: Iterable[CloneHook] = immutable.Seq()
-    val umethod_hooks: Iterable[UnknownMethodHook] = immutable.Seq()
-    val kmethod_hooks: Iterable[KnownMethodHook] = immutable.Seq()
+    val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
   }
   object Opts {
     final class Loggers(logs: Map[Symbol, Logger]) {
@@ -117,14 +110,18 @@ object CFA2Analysis {
   type BBEffects = MutableConcurrentMap[BB, MutableConcurrentMap[BBTracer, BBEffect]]
   
   type FTracer = Tracer[Method]
-  final case class FEffect(static_env_out: StaticEnv) extends Immutable with NotNull
+  final case class FEffect(static_env_out: StaticEnv,
+                           heap_out: HeapEnv) extends Immutable with NotNull
   type FEffects = MutableConcurrentMap[Method, MutableConcurrentMap[FTracer, FEffect]]
   
   // TODO: Let's migrate to a proper database at some point...
   final case class FIndex(static_env: StaticEnv,
+                          heap: HeapEnv,
                           params: Seq[Val[SUBT[Instantiable]]]) extends Immutable
   final case class FSummary(uncaught_throws: MutableConcurrentMultiMap[EncodedTrace, Exceptional],
-                            rets: MutableConcurrentMap[EncodedTrace, RetVal]) extends Immutable with NotNull
+                            rets: MutableConcurrentMap[EncodedTrace, RetVal],
+                            static_envs: MutableConcurrentMap[EncodedTrace, SFEnv],
+                            heaps: MutableConcurrentMap[EncodedTrace, HeapEnv]) extends Immutable with NotNull
   type FSummaries = MutableConcurrentMap[Method, MutableConcurrentMap[FIndex, FSummary]]
                             
   /**
@@ -185,12 +182,8 @@ object CFA2Analysis {
     }
   }
   
-  def run(contexts: java.lang.Iterable[Context], opts: Opts) = {
-    (new CFA2Analysis(contexts, opts)).run
-  }
-  
   lazy val singleton = {assert(_singleton != null); _singleton}
-  private var _singleton : CFA2Analysis = null
+  private var _singleton : CFA2Analysis[Opts] = null
 }
 
 /**
@@ -213,11 +206,12 @@ object CFA2Analysis {
  * FIXME:
  * * We don't execute the static initialization code for classes once they're "loaded" 
  */
-final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] val opts:Opts) extends Optimizer {
+abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
+                                      protected[cfa2] final val opts:O) extends Optimizer {
   import CFA2Analysis._
   import Tracer._
   
-  def this(context: Context, opts: Opts) = this(immutable.Set(context), opts)
+  def this(context: Context, opts: O) = this(immutable.Set(context), opts)
   
   require(contexts forall {!_.dataMap.isEmpty})
   require(_singleton == null)
@@ -226,7 +220,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   import opts.log
   
   /* ====== Initialization ====== */
-  protected[cfa2] val methodMap = {
+  protected[cfa2] final val methodMap = {
     val build = {
       type Builder = mutable.MapBuilder[Method, Context, par.immutable.ParMap[Method, Context]]
       new Builder(par.immutable.ParMap()) {
@@ -241,7 +235,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       }
     build result
   }
-  protected[cfa2] val dataMap = {
+  protected[cfa2] final val dataMap = {
     val build = {
       type Builder = mutable.MapBuilder[Method, Context.Data, par.immutable.ParMap[Method, Context.Data]]
       new Builder(par.immutable.ParMap())
@@ -253,10 +247,10 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     }
     build result
   }
-  protected[cfa2] val classes = (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_))
-  protected[cfa2] val cdis = for(c <- classes) yield c.getCDI
+  protected[cfa2] final val classes = (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_))
+  protected[cfa2] final val cdis = for(c <- classes) yield c.getCDI
   /** Holds known IField slots */
-  protected[cfa2] val ifieldMap = {
+  protected[cfa2] final val ifieldMap = {
     val build = {
       type Builder = mutable.MapBuilder[IFieldSpec, FieldSlot.Known,
                                         par.immutable.ParMap[IFieldSpec, FieldSlot.Known]]
@@ -268,7 +262,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     build result
   }
   /** Holds known SField slots */
-  protected[cfa2] val sfieldMap = {
+  protected[cfa2] final val sfieldMap = {
     val build = {
       type Builder = mutable.MapBuilder[SFieldSpec, FieldSlot,
                                         par.immutable.ParMap[SFieldSpec, FieldSlot]]
@@ -287,7 +281,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   
   /* ======== Helpers depending upon initialization ====== */
   @inline
-  private[cfa2] def liftSField(spec:SFieldSpec) : FieldSlot = 
+  protected[cfa2] def liftSField(spec:SFieldSpec) : FieldSlot = 
     sfieldMap get spec match {
     case Some(slot) => slot
     case None => sfieldCache getOrElse (spec, {
@@ -298,7 +292,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       })
     }
   @inline
-  private[cfa2] def liftIField(spec:IFieldSpec) : FieldSlot =
+  protected[cfa2] def liftIField(spec:IFieldSpec) : FieldSlot =
     ifieldMap get spec match {
     case Some(slot) => slot
     case None => sfieldCache getOrElse (spec, {
@@ -310,12 +304,12 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     }
   
   @inline
-  private[cfa2] def methodForSpec(spec: MethodSpec) = {
+  protected[cfa2] def methodForSpec(spec: MethodSpec) = {
     def f(pair:(Method, Context.Data)) = Some(pair._1)
     (dataMap find { _._2.methRef.equals(spec) }).flatMap(f)
   }
   @inline
-  private[cfa2] def classForMethod(m: Method) = dataMap get m match {
+  protected[cfa2] def classForMethod(m: Method) = dataMap get m match {
     case Some(d) => Some(d.clazz)
     case None    => None
   }
@@ -325,16 +319,25 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     run()
   }*/
   
+  /* ====== Hooks ======= */
+  protected[cfa2] def instance_hooks: Iterable[InstanceHook]
+  //require(!(instance_hooks exists {_ == null}))
+  protected[cfa2] def clone_hooks: Iterable[CloneHook]
+  //require(!(clone_hooks exists {_ == null}))
+  protected[this] def umethod_hooks: Iterable[UnknownMethodHook]
+  //require(!(umethod_hooks exists {_ == null}))
+  protected[this] def kmethod_hooks: Iterable[KnownMethodHook]
+  //require(!(kmethod_hooks exists {_ == null}))
+  
   /* ====== Algorithm ===== */
-  private[this] val fsummaries = new FSummaries
-  private[this] def summarize(m: Method,
-                              index: FIndex,
-                              trace: EncodedTrace,
-                              ret: RetVal) : Unit = {
+  protected[this] val fsummaries = new FSummaries
+  protected[this] final def summarize(m: Method,
+                                      index: FIndex,
+                                      trace: EncodedTrace,
+                                      ret: RetVal) : Unit = {
     prep_summarize(m, index)
     log('debug) ("Summarizing "+m+":\n"+
                  "\tIndex:  "+index+"\n"+
-                 "\tTrace:  "+trace+"\n"+
                  "\tRetval: "+ret)
     val rets = fsummaries(m)(index).rets
     if(!rets.contains(trace))
@@ -342,32 +345,35 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     else
       rets(trace) = rets(trace) union ret
   }
-  private[this] def summarize(m: Method,
-                              index: FIndex,
-                              trace: EncodedTrace,
-                              uncaught_throws: Iterable[Exceptional]) : Unit = {
+  protected[this] final def summarize(m: Method,
+                                      index: FIndex,
+                                      trace: EncodedTrace,
+                                      uncaught_throws: Iterable[Exceptional]) : Unit = {
     prep_summarize(m, index)
     for(t <- uncaught_throws)
       fsummaries(m)(index).uncaught_throws += (trace, t)
   }
   @inline
-  private[this] def prep_summarize(m: Method,
-                                   index: FIndex) = {
+  protected[this] final def prep_summarize(m: Method,
+                                           index: FIndex) = {
     if(!fsummaries.contains(m))
       fsummaries += ((m, new MutableConcurrentMap))
     if(!fsummaries(m).contains(index)) {
-      val rets = new MutableConcurrentMap[EncodedTrace, RetVal]
       val throws = new MutableConcurrentMultiMap[EncodedTrace, Exceptional]
-      fsummaries(m)(index) = FSummary(throws, rets)
+      val rets = new MutableConcurrentMap[EncodedTrace, RetVal]
+      val static_envs = new MutableConcurrentMap[EncodedTrace, SFEnv]
+      val heaps = new MutableConcurrentMap[EncodedTrace, HeapEnv]
+      fsummaries(m)(index) = FSummary(throws, rets, static_envs, heaps)
     }
   }
   
-  private[this] val feffects = new FEffects
-  private[this] def faffect(m: Method, trace: FTracer,
-                            static_env_out: StaticEnv) = {
+  protected[this] val feffects = new FEffects
+  protected[this] final def faffect(m: Method, trace: FTracer,
+                                    static_env_out: StaticEnv,
+                                    heap_out: HeapEnv) = {
     if(!feffects.contains(m))
       feffects += ((m, new MutableConcurrentMap))
-    val effect = FEffect(static_env_out)
+    val effect = FEffect(static_env_out, heap_out)
     feffects(m) += ((trace, effect)) 
   }
   
@@ -378,14 +384,16 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   protected[this] type EvalWorklist = mutable.Map[Method, Boolean] 
   protected[this] val eval_worklist: EvalWorklist = mutable.Map((
       for(m <- methodMap.seq.keys
-          if opts.starting_points exists {_.identifies(m)})
+          if opts.starting_points exists {(ider:MethodIDer) => +(ider identifies m)})
         yield (m, false)).toSeq :_*)
   
   /*
    *  TODO: What should be the return value here?
    *  Should it be summaries?
    *  Should it be a full execution graph?
-   *  Should it be some set of analysis data?  
+   *  Should it be some set of analysis data?
+   *  
+   *  FIXME: Make the <init>s go before anything else and then feed back in
    */
   def run() : Unit = {
     log('debug) ("Classes are:")
@@ -396,7 +404,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     var continue = true
     do {
       eval_worklist find {!_._2} match {
-        case Some((m, _)) => eval(m); eval_worklist(m) = true
+        case Some((m, _)) => eval(m, new SFEnv, new HeapEnv); eval_worklist(m) = true
         case None         => continue = false
       } 
     } while(continue)
@@ -404,16 +412,22 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     log('debug) ("\n\n******************** Done!");
   }
   
-  private[this] def eval(start: Method) = {
+  private[this] def eval(start: Method,
+                         initial_static_env: SFEnv,
+                         initial_heap: HeapEnv) = {
     log('info) ("\nEvaluating "+start)
     
     {
-      val static_env = new SFEnv()
       // NOTE: Also takes care of any implicit this param
       val paramTs = start.getEffectiveDescriptor().getParameterTypes()
       // Params are by definition instantiable
       val params = makeUnknowns(Type(paramTs).asInstanceOf[Seq[Instantiable]])
-      trace(start, Tracer(), new MutableConcurrentMap[FTracer, TracePhase], static_env, params:_*)(Val.Bottom)
+      val summary = trace(start,
+                          Tracer(),
+                          new MutableConcurrentMap[FTracer, TracePhase],
+                          initial_static_env,
+                          initial_heap,
+                          params:_*)(Val.Bottom)
     }
   
   /**
@@ -423,11 +437,13 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
             mtracer: FTracer,
             mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
             _static_env: StaticEnv,
+            _heap: HeapEnv,
             params: Val[SUBT[Instantiable]]*)
             (implicit cdeps: Val_): FSummary = {
     log('debug) ("\nTracing "+meth+" ["+mtracer.count(_ == meth)+"/"+mtracer.size+"]")
     
     var static_env = _static_env
+    var heap = _heap
     
     val header = mtracer.preheader :+ meth
     val phase = mtracePhases getOrElse (header, TracePhase.Init)
@@ -438,12 +454,13 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
       assert(phase < TracePhase.CleanupDone)
       phase match {
         case TracePhase.Step =>
-          faffect(meth, header, static_env)
+          faffect(meth, header, static_env, heap)
         case TracePhase.CleanupStart =>
           val lastEffect = feffects(meth)(header)
           static_env = static_env ++# (static_env induceUnknowns lastEffect.static_env_out)
+          heap = heap ++# (heap induceUnknowns lastEffect.heap_out)
           log('debug) ("Induced unknowns for recursion cleanup")
-          faffect(meth, header, static_env)
+          faffect(meth, header, static_env, heap)
       }
     }
     
@@ -451,7 +468,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
     
     log('debug) ("Params: "+params)
     //log out meth.dump
-    val findex = FIndex(static_env, params)
+    val findex = FIndex(static_env, heap, params)
     if(fsummaries contains meth)
       fsummaries(meth) get findex match {
         case Some(summ) =>
@@ -807,7 +824,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
           @inline
           def call_unknown(retT: Instantiable) = {
             val params = mkparams(operands).toSeq
-            val hookRets = (opts.umethod_hooks map (_(spec, params))).flatten
+            val hookRets = (umethod_hooks map (_(spec, params))).flatten
             val result =
               if(hookRets isEmpty) Val.Unknown(retT)
               else hookRets reduce (_ union _)
@@ -816,7 +833,6 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
           }
           @inline
           def call_known(m: Method, retT: Instantiable) = {
-            var static_env_ = static_env
             var params = mkparams(operands).toSeq
             val next_header = (mtracer.preheader :+ m).preheader :+ m
             val next_phase = mtracePhases get next_header
@@ -829,8 +845,8 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                 call_unknown(retT)
               case _ =>
                 try {
-                  var sum = trace(m, mtracer, mtracePhases, static_env_, params:_*)
-                  HOOK(opts.kmethod_hooks, (spec, params, sum), {sum = _:FSummary})
+                  var sum = trace(m, mtracer, mtracePhases, static_env, heap, params:_*)
+                  HOOK(kmethod_hooks, (m, params, sum), {sum = _:FSummary})
                   eval_summary(sum)
                 }
                 catch {
@@ -1040,7 +1056,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
                   case INT =>
                     val ia = a.asInstanceOf[INT.Instance].self
                     val ib = b.asInstanceOf[INT.Instance].self
-                    Tri.liftBoolean(code match {
+                    Tri.lift(code match {
                       case IF_EQ => ia == ib
                       case IF_NE => ia != ib
                       case IF_LT => ia <  ib
@@ -1179,7 +1195,7 @@ final class CFA2Analysis(contexts : java.lang.Iterable[Context], private[cfa2] v
   trace_bb(meth.firstBlock,
            Tracer(), immutable.Set(),
            BBEvalState(0, Val.Bottom, Val.Bottom, Val.Bottom),
-           findex.static_env, new TraceFrame, HeapEnv.defaultM)(cdeps)//.result
+           findex.static_env, new TraceFrame, findex.heap)(cdeps)//.result
   assert((fsummaries contains meth) && (fsummaries(meth) contains findex))
   
   return fsummaries(meth)(findex)

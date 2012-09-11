@@ -18,9 +18,9 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
   
   abstract class Instance_(params: IParams, deps:Val_)
   extends super.Instance_(params, deps) { self :Instance =>
-    protected final lazy val isNull = param[Tri]('isNull)
-    /** Token for keeping track of heap reference; should be a System.nanoTime */
-    protected final lazy val heapToken = param[Long]('heapToken)
+    final lazy val isNull = param[Tri]('isNull)
+    /** Token for keeping track of heap reference */
+    final lazy val heapToken = param[Long]('heapToken)
     
     /** Tests for lifted referential equality */
     final def refEq(that: RefType#Instance) : Tri =
@@ -81,6 +81,8 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
       case Some(vref) => vref.asInstanceOf[Val[typ.type]].asSet flatMap
           ((v: VAL[Instantiable]) => v.asInstanceOf[Instance] ~~~ f)
     }
+    /** Assert that this is the newest value, so just dummy-reference it */
+    final def unary_! = ref(null)
   }
   type Instance <: Instance_
 }
@@ -101,9 +103,9 @@ case object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
    *  the only unknown types we could encounter would have to be
    *  non-primitives, and hence RefTypes
    */
-  protected override def << (t: Type) = t.isInstanceOf[RefType]
+  protected override def << (t: Type) = super.<<(t) | t.isInstanceOf[RefType]
   // TODO: Should this be Tri.U instead? Does JVM have nulls which can supertype?
-  protected override def >> (t: Type) = false
+  protected override def >> (t: Type) = super.>>(t) | false
   
   val singleton = Instance_
   object Instance_ extends super.Instance_(paramify(('isNull, Tri.T),
@@ -135,21 +137,21 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
     OBJECT.classRegistry += ((klass, this))
   }
   
-  protected override def >> (t: Type) =
+  protected override def >> (t: Type) = super.>>(t) | {
     if(!t.isInstanceOf[OBJECT]) Tri.F
     else {
       val t_ = t.asInstanceOf[OBJECT]
       if(this.klass == null || t_.klass == null) Tri.U
       else this.klass isAssignableFrom t_.klass
-    }
+    }}
   
-  protected override def << (t: Type) =
+  protected override def << (t: Type) = super.<<(t) | {
     if(!t.isInstanceOf[OBJECT]) Tri.F
     else {
       val t_ = t.asInstanceOf[OBJECT]
       if(this.klass == null || t_.klass == null) Tri.U
       else t_.klass isAssignableFrom this.klass
-    }
+    }}
   
   /*
    *  Declarative API for subclasses to define attributes.
@@ -247,7 +249,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
       clone(('fields, fields ++# newFields))()
     
     /* Setting of emulated fields */
-    final def monitored_=(b:Boolean) = clone(('monitored, Tri.liftBoolean(b)))()
+    final def monitored_=(b:Boolean) = clone(('monitored, Tri.lift(b)))()
     final def monitored_=(vb:VAL[BOOLEAN.type]) = {
       val b =
         if(vb.isUnknown) Tri.U
@@ -262,6 +264,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
     
     /** Indexing of a field */
     final def apply(f:IFieldSpec) : Val_ = apply(fieldSlots getOrRegister f)
+    final def apply(f:String): Val_  = apply(fieldSlots(f))
     final def apply(f:FieldSlot): Val_ = fields.get(f) match {
       case Some(v) => v
       case None    => Val.Atom(fieldBacking(f))

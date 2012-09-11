@@ -17,9 +17,18 @@ package object `val` {
   
   type VAL[+T <: Instantiable] = T#Value
   type VAL_ = VAL[Instantiable]
+  
+  type INST[+T <: Instantiable] = T#Instance
+  type INST_ = INST[Instantiable]
+  
   type SUBV[+T <: Instantiable] = V forSome {type V <: VAL[T]}
   type SUPV[-T <: Instantiable] = V forSome {type V >: VAL[T]}
-  type ?[+T <: Instantiable] = T#Unknown
+  
+  type ?[+T <: Instantiable] = UNKNOWN[T]
+  type UNKNOWN[+T <: Instantiable] = T#Unknown
+  type UNKNOWN_ = UNKNOWN[Instantiable]
+  type KNOWN[+T <: Instantiable] = INST[T]
+  type KNOWN_ = INST_
   
   type SUBT[T <: Type] = Sub forSome {type Sub <: T}
   
@@ -45,4 +54,25 @@ package object `val` {
         None
     }
   
+  // TODO: Hack for the non-existence of isNull for Unknown
+  final def isPossiblyNull(v: VAL[RefType]) = v match {
+    case _:UNKNOWN[RefType] => Tri.U
+    case v:KNOWN[RefType]   => v.isNull 
+  }
+  
+  /*type VOID = VOID.type
+  type BOOLEAN = BOOLEAN.type
+  type BYTE = BYTE.type
+  type CHAR = CHAR.type
+  type DOUBLE = DOUBLE.type
+  type FLOAT = FLOAT.type
+  type INT = INT.type
+  type LONG = LONG.type
+  type SHORT = SHORT.type
+  
+  type CLASS = CLASS.type
+  type STRING = STRING.type
+  type BIG_INT = BIG_INT.type
+  type BIG_DEC = BIG_DEC.type
+  type LOCALE = LOCALE.type*/
 }

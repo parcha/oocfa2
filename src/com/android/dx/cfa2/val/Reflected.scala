@@ -14,7 +14,7 @@ trait Reflected[ET] extends Instantiable {
   
   require(EigenType_ != null)
   if(this.isInstanceOf[OBJECT])
-    assert(this.asInstanceOf[OBJECT].klass == EigenType_.erasure)
+    require(this.asInstanceOf[OBJECT].klass == EigenType_.erasure)
   reflRegistry.register(EigenType_, this)
   
   // Just a default

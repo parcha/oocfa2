@@ -24,17 +24,30 @@ sealed abstract class Tri extends Immutable with NotNull with Serializable {
     }
   }
   final def ^(o:Tri) = (this & !o) | (!this & o) 
-  final def unary_! = this match {
+  final def unary_! : Tri = this match {
     case T => F
     case F => T
     case U => U
   }
+  /** T | U **/
+  def unary_+ : Boolean
+  /** F | U **/
+  def unary_- : Boolean
 }
 object Tri {
-  case object T extends Tri
-  case object F extends Tri 
-  case object U extends Tri
-  implicit def liftBoolean(b:Boolean) =
+  case object T extends Tri {
+    val unary_+ = true
+    val unary_- = false
+  }
+  case object F extends Tri {
+    val unary_+ = false
+    val unary_- = true
+  } 
+  case object U extends Tri {
+    val unary_+ = true
+    val unary_- = true
+  }
+  implicit def lift(b:Boolean): Tri =
     if(b) T
     else  F
   implicit def lowerTri(t:T.type) = true

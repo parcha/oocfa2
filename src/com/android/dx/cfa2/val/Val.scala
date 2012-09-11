@@ -55,6 +55,17 @@ extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Seria
   
   final def satisfies (test: VAL[T] => Boolean) = asSet exists {test(_)}
   
+  final def =?[T_ <: T @uncheckedVariance](that: Val[T_]): Tri = this match {
+    case Bottom => Tri.F
+    case Top    => if(that==Bottom) Tri.F else Tri.U
+    case _      =>
+      that match {
+        case Bottom => Tri.F
+        case Top    => Tri.U
+        case _      => this.asSet == that.asSet
+      }
+  }
+  
   //final def apply[R] (f: VAL[T] => R): immutable.Set[R] = asSet 
 }
 object Val {

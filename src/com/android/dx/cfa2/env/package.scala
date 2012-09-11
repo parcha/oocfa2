@@ -16,6 +16,7 @@ package object env {
   with PrettyMap[VarT, Val_] with Dumpable with NotNull with Serializable {
     override protected def keyStr(k:VarT) = "[" + k.toString + "]"
     
+    // FIXME: This may be wrong... or at least not precise enough. Also consider heap vs. static-env
     def induceUnknowns[E <: Map[VarT, Val_]](prev: E)(implicit cdeps: Val_) : Map[VarT, Val_] = {
       // Gather all seemingly-loop-dependent vals
       val loopDependent: mutable.Set[Val_] = mutable.Set()

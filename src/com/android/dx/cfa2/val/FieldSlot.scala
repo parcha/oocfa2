@@ -28,11 +28,29 @@ object FieldSlot {
 final class FieldSlotSet(val parent:FieldSlotSet)
 extends mutable.HashSet[FieldSlot] with LinkSet[FieldSlot, FieldSlotSet] with mutable.SynchronizedSet[FieldSlot] {
   def apply(spec:FieldSpec) = get(spec).get
+  def apply(name:String) = get(name).get
+  
   def get(spec:FieldSpec) : Option[FieldSlot] = {
     for(f <- this)
       if(f.spec == spec) return Some(f)
     return None
   }
+  def get(name:String) = {
+    def fullSpecName(spec:FieldSpec) = spec.getDefiningClass().getType().toHuman + specName(spec)
+    def specName(spec:FieldSpec) = spec.getNat().getName().getString()
+    val filter: FieldSpec => Boolean =
+      if(name contains '.')
+        {fullSpecName(_) == name}
+      else
+        {specName(_) == name}
+    val candidates = this filter ((f:FieldSlot) => filter(f.spec))
+    presume(candidates.size <= 1)
+    candidates.size match {
+      case 0 => None
+      case 1 => Some(candidates.head)
+    }
+  }
+  
   def contains(spec:FieldSpec) = this exists {_.spec == spec}
   override def iterator = super[LinkSet].iterator
   
@@ -49,6 +67,7 @@ final class FieldMap
 (final val self : FieldMap.M = new immutable.HashMap[FieldSlot, Val_])
 extends immutable.MapProxy[FieldSlot, Val_] with FieldMap.ProxyFactoried {
   def contains(spec:FieldSpec) = this exists {_._1.spec == spec }
+  
 }
 object FieldMap
 extends MapProxyFactory[FieldSlot, Val_, immutable.Map[FieldSlot, Val_], FieldMap] (immutable.Map(), new FieldMap(_))

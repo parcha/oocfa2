@@ -7,6 +7,7 @@ import cfa2._
 import CFA2Analysis.singleton.opts.log
 import env._
 import Tri._
+import parsers._
 
 /**
  * Also counts as the top type.
@@ -29,47 +30,38 @@ abstract case class Type private[`val`] (val raw:RawType) extends Immutable with
   
   def descriptor = raw.getDescriptor
   val descriptorMatch = (descriptorRegex findFirstMatchIn descriptor).get
+  lazy val name = raw.toHuman()
   
-  /**
-   *  By the rules of Type, Scala objects represent instantiating classes,
-   *  therefore the actual lifted class this Type represents is the superclass of
-   *  its direct Type.
-   */
-  /*private final val liftedClass = this match {
-    //case _:Incomplete => this.getClass.getSuperclass.getS
+  private final val liftedClass = this match {
     case _:Instancing => this.getClass.getSuperclass
     case _            => this.getClass
-  }*/
+  }
   
   /** isSupertypeOf */
   final def > (t: Type) : Tri =
     t == this | concensus(
     this >> t , t << this)
   /** Non-mutually-recursive, strictly isSupertypeOf */
-  protected def >> (t: Type) : Tri = Tri.U/* =
-    if(liftedClass isAssignableFrom t.liftedClass) Tri.T
-    else if(t.isInstanceOf[NotBuiltIn] ||
-            // If we're asking wrt a primitve type, no user type can subtype one
-            (this.isInstanceOf[NotBuiltIn] && this.isInstanceOf[RefType]))
-      /* TODO: Currently, since we don't parse type descriptors, if we determine it's not
-       * a subtype, it may very well be because we have an incomplete hierarchy */
+  protected def >> (t: Type) : Tri = Tri.U/*
+    if(liftedClass isAssignableFrom t.liftedClass)
+      Tri.T
+    else if(t.isInstanceOf[NotBuiltIn] || this.isInstanceOf[NotBuiltIn])
       Tri.U
-    else Tri.F*/
+    else
+      Tri.F*/
   
   /** isSubtypeOf */
   final def < (t: Type) : Tri =
     t == this | concensus(
     this << t , t >> this)
   /** Non-mutually-recursive, strictly isSubtypeOf */
-  protected def << (t: Type) : Tri = Tri.U/*=
-    if(t.liftedClass isAssignableFrom liftedClass) Tri.T
-    else if(t.isInstanceOf[NotBuiltIn] ||
-            // If we're asking wrt a primitve type, no user type can subtype one
-            (this.isInstanceOf[NotBuiltIn] && this.isInstanceOf[RefType]))
-      /* TODO: Currently, since we don't parse type descriptors, if we determine it's not
-       * a subtype, it may very well be because we have an incomplete hierarchy */
+  protected def << (t: Type) : Tri = Tri.U/*
+    if(t.liftedClass isAssignableFrom liftedClass)
+      Tri.T
+    else if(this.isInstanceOf[NotBuiltIn] || t.isInstanceOf[NotBuiltIn])
       Tri.U
-    else Tri.F*/
+    else
+      Tri.F*/
 }
 object Type {
   /*case object BOTTOM extends Instantiable(null) {
@@ -108,7 +100,10 @@ object Type {
     for(i <- 0 until raws.size)
       yield apply(raws.get(i))
   }
-  def apply(klass: Class[_]) = intern(RawType.internClassName(klass.getName))
+  def apply(klass: Class[_]): Type = intern(RawType.internClassName(klass.getName))
+  def apply[C](implicit C_ : Manifest[C]): Type = apply(C_.erasure)
+  /** May throw IllegalArgumentException if the class name given isn't valid **/
+  def apply(type_id: TypeIDExpr): Type = intern(RawType.intern(type_id.descriptor))
   
   implicit def wrap(raw: RawType) = intern(raw)
   implicit def unwrap(t: Type) = t.raw

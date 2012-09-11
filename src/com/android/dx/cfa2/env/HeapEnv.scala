@@ -23,5 +23,5 @@ extends Env[Var.RawHeap_] with immutable.MapProxy[Var.RawHeap_, Val_] with HeapE
     if(updateHook != null) updateHook(`var`, `val`)
 }
 object HeapEnv extends EnvFactory[Var.RawHeap_, HeapEnv](new HeapEnv(_, null)) {
-  val defaultM = new immutable.HashMap[Var.RawHeap_, Val_]
+  val defaultM = immutable.HashMap.empty[Var.RawHeap_, Val_]
 }
