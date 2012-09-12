@@ -18,10 +18,13 @@ package object env {
     
     // FIXME: This may be wrong... or at least not precise enough. Also consider heap vs. static-env
     def induceUnknowns[E <: Map[VarT, Val_]](prev: E)(implicit cdeps: Val_) : Map[VarT, Val_] = {
+      if(prev.isEmpty) return this
       // Gather all seemingly-loop-dependent vals
       val loopDependent: mutable.Set[Val_] = mutable.Set()
       loopDependent ++= (this.keys filter (!prev.contains(_))) map (this(_))
-      assert ((prev.keys filter (!this.contains(_))).isEmpty)
+      // The keys from the previous environment should still exist in this one
+      assert ((prev.keys filterNot (this contains _)).isEmpty,
+              (prev filterKeys (this contains _)))
       for(v <- this.values)
         if(v.asSet exists (_.dependsUpon(loopDependent ++ immutable.Set(cdeps)) != Tri.F))
           loopDependent += v
@@ -34,7 +37,7 @@ package object env {
               else v.typ.unknown
           toInduce += ((k, Val(newvs)))
         }
-      toInduce
+      return toInduce
     }
   }
   

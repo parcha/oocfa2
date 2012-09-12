@@ -57,29 +57,29 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
     /** Ref constructor; subclasses should specify their actual, final Ref */
     protected[this] val ref : HeapEnv => Ref with NotNull
     // TODO: HACK
-    protected val rawRef = new Var.RawHeap(heapToken){}//{ type Source = Null; val src = null }
+    protected lazy val rawRef = new Var.RawHeap(heapToken){}//{ type Source = Null; val src = null }
     /** "Dereference"; gets most up-to-date version(s) */
-    final def unary_~(implicit env: HeapEnv) : Val[typ.type] = env.get(rawRef) match {
-      case None      => Val.Atom(self).asInstanceOf[Val[typ.type]]
+    @inline final def unary_~(implicit env: HeapEnv) : Val[typ.type] = env.get(rawRef) match {
+      case None       => Val.Atom(self).asInstanceOf[Val[typ.type]]
       case Some(refs) => refs.asInstanceOf[Val[typ.type]]
     }
     /** "Dereference-and-apply" */
-    final def ~[T <: Instantiable](f: Instance#Ref => Val[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
+    @inline final def ~[T <: Instantiable](f: Instance#Ref => Val[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
       case None       => f(ref(env))
       case Some(vref) => vref.asInstanceOf[Val[typ.type]] eval_
-          ((v: VAL[Instantiable]) => v.asInstanceOf[Instance] ~ f)
+          ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** "Dereference, apply, and collect" */
-    final def ~~[T <: Instantiable](f: Instance#Ref => VAL[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
+    @inline final def ~~[T <: Instantiable](f: Instance#Ref => VAL[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
       case None       => Val.Atom(f(ref(env)))
-      case Some(vref) => vref.asInstanceOf[Val[typ.type]] eval_
-          ((v: VAL[Instantiable]) => v.asInstanceOf[Instance] ~~ f)
+      case Some(vref) => vref.asInstanceOf[Val[typ.type]] eval
+          ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** "Dereference, apply, and custom-collect" */
-    final def ~~~[T](f: Instance#Ref => T)(implicit env: HeapEnv) : GenSet[T] = env.get(rawRef) match {
+    @inline final def ~~~[T](f: Instance#Ref => T)(implicit env: HeapEnv) : GenSet[T] = env.get(rawRef) match {
       case None       => immutable.Set(f(ref(env)))
-      case Some(vref) => vref.asInstanceOf[Val[typ.type]].asSet flatMap
-          ((v: VAL[Instantiable]) => v.asInstanceOf[Instance] ~~~ f)
+      case Some(vref) => vref.asInstanceOf[Val[typ.type]].asSet map
+          ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** Assert that this is the newest value, so just dummy-reference it */
     final def unary_! = ref(null)

@@ -12,8 +12,9 @@ sealed case class ROperator protected (private val raw:Rop) extends Immutable wi
   import ROperator._
   
   if(opcode.arity != -42)
-    assert(opcode.isCompatibleArity(raw.getSources.size))
+    assert(opcode.isCompatibleArity(arity), (this, arity, opcode, opcode.arity))
   
+  def arity = raw.getSources.size
   def opcode:OpCode = ROpCodes(raw.getOpcode).asInstanceOf[OpCode]
   def branchingness = Branchingnesses(raw.getBranchingness)
   def resultType = raw.getResult
@@ -169,7 +170,7 @@ object ROpCodes extends Enumeration(1) {
   
   val SWITCH = new OpCode(1) with Branches
   
-  sealed abstract class Arith protected (arity:Int = 2)
+  sealed abstract class Arith protected (arity:Int = -3)
   extends OpCode(arity) with FixedReflected {
     type EigenArg = AnyVal
     type EigenRet = AnyVal //Int or Long
@@ -210,7 +211,7 @@ object ROpCodes extends Enumeration(1) {
   sealed class IntegralArith private[ROpCodes] (
       intF:   (Int*)  =>Int,
       longF:  (Long*) =>Long,
-      arity:Int = 2)
+      arity:Int = -3)
   extends Arith(arity) {
     type ArgT <: Type.Integral with `val`.Reflected[EigenArg]
     protected[this] final def func_[@specialized(Int, Long) A <: EigenArg]
@@ -332,7 +333,7 @@ object ROpCodes extends Enumeration(1) {
   
   val RETURN = new End(-2)
   val ARRAY_LENGTH = new OpCode(1)
-  val THROW = new End(1)
+  val THROW = new OpCode(1) with Branches
   
   sealed class Monitor private[ROpCodes] extends OpCode(1) with NoResult with OnObject
   val MONITOR_ENTER = new Monitor
@@ -346,7 +347,7 @@ object ROpCodes extends Enumeration(1) {
   val NEW_INSTANCE = new Allocate(0) with WithConstant
   // TODO: How does this operation actually behave?!? Sometimes it takes 1, sometimes a constant...
   val NEW_ARRAY = new Allocate(-42) with WithConstant
-  val FILLED_NEW_ARRAY = new Allocate(1) with WithConstant
+  val FILLED_NEW_ARRAY = new Allocate(-42) with WithConstant
   
   sealed class Caster private[ROpCodes] extends OpCode(1) with OnObject with WithConstant
   val CHECK_CAST = new Caster

@@ -87,12 +87,25 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
    * Extraction should occur via the provided "param" method and the extracted fields should be lazy vals.
    */
   // TODO: Introspect on params to identify other VALs and Vals which we depend upon
-  protected abstract class Instance_(protected[this] final val params: IParams,
+  protected abstract class Instance_(protected[this] final var params: IParams,
                                      protected[this] final val deps: Val_) extends self.Value { _:Instance =>
-    protected final def param[T](sym: Symbol) = iparamRegistry(sym).convert(
+    private var _origin: Option[self.Instance] = None
+    def origin = _origin
+    
+    protected final def param[T](sym: Symbol): T = iparamRegistry(sym).convert(
       params.get(sym) match {
         case Some(p) => p
-        case None    => iparamRegistry(sym).genDefault
+        case None    => origin match {
+          case Some(o) => o.param[T](sym) // Defer to the original
+          case None    => iparamRegistry(sym).genDefault match {
+            case Left(default) =>
+              // Keep the generated default so we don't re-eval
+              val cvt: T = iparamRegistry(sym).convert(default).asInstanceOf[T]
+              params += ((sym, cvt))
+              default
+            case Right(default) => default
+          }
+        }
       }).asInstanceOf[T]
     
     final val isUnknown = deps == Val.Top || (params get 'unknown match {
@@ -107,17 +120,24 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     final def clone(_params: IParams, extraDeps: Seq[Val_]) : Instance = {
       val deps_ = deps union Val.Atom(this) union Val.deepUnion(extraDeps)
       var params_ = _params
-      def addMissingParams(ps: IParams) = params_ ++= (for((k,v) <- ps if!(params_ contains k)) yield (k,v))
-      addMissingParams(params)
+      
+      def addMissingParams(ps: IParams) =
+        params_ ++= (for((k,v) <- ps if!(params_ contains k)) yield (k,v))
+      addMissingParams(params) // TODO: is this necessary anymore?
       
       // FIXME: Hack
       import CFA2Analysis.singleton.clone_hooks
       HOOK(clone_hooks, (this, deps_, params_), addMissingParams)
         
-      constructor(params_, deps_)
+      val clone = constructor(params_, deps_)
+      clone._origin = Some(this)
+      clone
     }
-    final def clone(extraDeps: Val_ *) : Instance =
-      constructor(params, deps union Val.Atom(this) union Val.deepUnion(extraDeps))
+    final def clone(extraDeps: Val_ *) : Instance = {
+      val clone = constructor(params, deps union Val.Atom(this) union Val.deepUnion(extraDeps))
+      clone._origin = Some(this)
+      clone
+    }
                   
     final override lazy val toString = {
       val build = new StringBuilder
@@ -152,19 +172,22 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
             default != null)
     type T_ = T
     def check(v:Any) = if(checker!=null) checker(v.asInstanceOf[T])
-    def genDefault = default match {
+    // Left means we generated, right means we didn't
+    def genDefault: Either[T, T] = default match {
       case None => throw new RuntimeException
       case Some(e) => e match {
-        case Left(f) => f()
-        case Right(d) => d
+        case Left(f) => Left(f())
+        case Right(d) => Right(d)
       }
     }
-    def convert(v: Any) = v match {
-      case v:T => v
-      case _   =>
-        if(converter == null) v.asInstanceOf[T]
-        else converter(v)
+    // For when you don't care either way
+    def genDefault_ : T = genDefault match {
+      case Left(l)  => l
+      case Right(r) => r
     }
+    def convert(v: Any) =
+      if(converter == null) v.asInstanceOf[T]
+      else converter(v)
     def clone(default: Option[Either[() => _<:T, T]]=default,
               checker: T => Unit=checker) = IParamRegistryEntry[T](manifest, default, checker, converter)
   }
@@ -205,7 +228,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
       params.get(p) match {
         case None =>
           require(e.default != None)
-          build += ((p, e.genDefault))
+          build += ((p, e.genDefault_))
         case Some(v_) =>
           val v = e convert v_
           require(e.manifest.erasure.isInstance(v))

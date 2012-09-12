@@ -36,7 +36,7 @@ extends OBJECT(raw) with Reflected[ET] {
     }
     
     final def \(name:String)(vargs: Val[Reflected[_]]*) : Val_ = {
-      require(!this.isUnknown)
+      //require(!this.isUnknown)
       val argCs = vargs map (_.asSet.head.typ.EigenType_.erasure)
       val m = klass.getDeclaredMethod(name, argCs:_*)
       (this\m)(vargs:_*)

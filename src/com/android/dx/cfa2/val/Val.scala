@@ -182,6 +182,8 @@ object Val {
   /** Special "subtype" just for checking if a value is unknown */
   object Unknown /*extends Atom[Nothing](null)*/ {
     def apply[T <: Instantiable](typ:T) = Atom(typ.unknown)
+    def apply[T <: Instantiable](typs:T*) = Val((typs map {_.unknown}).toSet)
+    def apply[T <: Instantiable](typs:collection.Iterable[T]) = Val((typs map {_.unknown}).toSet)
     def unapply[T <: Instantiable](atom:Atom[T]) : Option[VAL[T]] =
       if(atom.v.isUnknown) Some(atom.v)
       else None

@@ -29,7 +29,7 @@ final case class Method(val raw:Raw, val rop:RopMethod) extends MethodDesc {
   lazy val blocks: BasicBlockSet = {
     val bbs = rop.getBlocks
     new BasicBlockSet(
-      for(i <- 0 until bbs.size) yield BasicBlock.wrap(bbs.get(i), this))
+      (for(i <- 0 until bbs.size) yield BasicBlock.wrap(bbs.get(i), this)).toSet)
   }
   def firstBlock = blocks(rop.getFirstLabel)
   

@@ -25,16 +25,31 @@ final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends 
   lazy val predecessors = {
     val preds = parent.rop.labelToPredecessors(label)
     new BasicBlockSet(
-      for(i <- 0 until preds.size) yield parent.blocks(preds.get(i)))
+      (for(i <- 0 until preds.size) yield parent.blocks(preds.get(i))).toSet)
   }
   lazy val successors = {
     val succs = raw.getSuccessors
     new BasicBlockSet(
-      for(i <- 0 until succs.size) yield parent.blocks(succs.get(i)))
+      (for(i <- 0 until succs.size) yield parent.blocks(succs.get(i))).toSet)
   }
   
   lazy val alt_succ = successors(raw.getSecondarySuccessor)
   lazy val prim_succ = successors(raw.getPrimarySuccessor)
+  
+  def first_ins: Instruction = raw.getFirstInsn
+  def last_ins: Instruction = raw.getLastInsn
+  
+  lazy val handlers: immutable.Set[BasicBlock] =
+    (successors filter {_.first_ins.opcode == ROpCodes.MOVE_EXCEPTION}).toSet
+  
+  import `val`._
+  def handlersFor(t:Type): immutable.Set[BasicBlock] =
+    handlers filter {(succ: BasicBlock) => {
+      val first = succ.first_ins
+      // Pick out the successors which start with a handler for the type t
+      // TODO: Should it be exact, or should it be a subtype?
+      first.resultT == t
+    }}
   
   lazy val dump = raw.dump
   override def toString = raw.toString
@@ -53,8 +68,8 @@ object BasicBlock {
   implicit def unwrap(bb:BasicBlock) = bb.raw
 }
 
-final class BasicBlockSet private[wrap] (bbs: Iterable[BasicBlock])
-extends IterableProxy[BasicBlock] with Immutable with NotNull {
+final class BasicBlockSet private[wrap] (bbs: Set[BasicBlock])
+extends SetProxy[BasicBlock] with Immutable with NotNull {
   // Put the blocks in their labeled order
   private val map = {
     val build = new mutable.HashMap[Int, BasicBlock]
@@ -62,7 +77,6 @@ extends IterableProxy[BasicBlock] with Immutable with NotNull {
       build(bb.label) = bb
     immutable.HashMap(build.toSeq:_*)
   }
-  val self = map.values
+  val self = bbs
   def apply(label: Int) = map(label)
-  def contains(bb: BasicBlock) = map.contains(bb.label)
 }

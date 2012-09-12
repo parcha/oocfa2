@@ -13,7 +13,7 @@ sealed case class Instruction(val raw:RawInsn) extends Immutable with NotNull {
   def sources = raw.getSources
   def sourceTs = operation.sourceTypes
   def result = raw.getResult
-  def resultT = operation.resultType
+  def resultT = Type(operation.resultType)
   def catchTs = raw.getCatches
   def branches = (catchTs.size > 0) || opcode.isInstanceOf[ROpCodes.Branches]
   def position = raw.getPosition

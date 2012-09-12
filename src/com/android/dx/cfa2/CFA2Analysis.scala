@@ -37,6 +37,7 @@ object CFA2Analysis {
     def recursionFuel: Int
     def loopingFuel: Int
     def outPath: String
+    def continueOnOverflow = !debug
     
     protected def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
     protected def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
@@ -130,13 +131,13 @@ object CFA2Analysis {
    * transparent (as unassigned) to any branches thereafter
    */
   final case class BBEvalState(param_index: Int,
-                               retval: Val_,
-                               error: Val[Exceptional],
-                               pseudo: Val_) extends Immutable with NotNull {
+                               retval: Option[Val_],
+                               error: Option[Val[Exceptional]],
+                               pseudo: Option[Val_]) extends Immutable with NotNull {
     def update(param_index_ :Int      = param_index,
-               retval_ :Val_          = retval,
-               error_ :Val[Exceptional] = error,
-               pseudo_ :Val_          = pseudo) =
+               retval_ :Option[Val_]             = retval,
+               error_  :Option[Val[Exceptional]] = error,
+               pseudo_ :Option[Val_]             = pseudo) =
       BBEvalState(param_index_, retval_, error_, pseudo_)
   }
   
@@ -508,6 +509,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       if(!bbeffects.contains(bb))
         bbeffects += ((bb, new MutableConcurrentMap))
       val effect = BBEffect(static_env_out, tracef_out, heap_out, uncaught_out)
+      log('debug) ("New BBEffect for "+trace+"\n"+effect)
       bbeffects(bb) += ((trace, effect))
     }
     
@@ -549,23 +551,23 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     @inline def take_retval = {
       val r = eval_state.retval; update_retval(Val.Bottom);
-      assert(r != null); r
+      assert(r != null); r.get
     }
-    @inline def update_retval(r: Val_) = eval_state = eval_state.update(retval_ = r)
+    @inline def update_retval(r: Val_) = eval_state = eval_state.update(retval_ = Some(r))
     
     // Can return null
     @inline def take_error = {
-      val e = eval_state.error; update_error(Val.Bottom); e
+      val e = eval_state.error; update_error(Val.Bottom); e.get
     }
-    @inline def update_error(e: Val[Exceptional]) = eval_state = eval_state.update(error_ = e)
+    @inline def update_error(e: Val[Exceptional]) = eval_state = eval_state.update(error_ = Some(e))
     
     @inline def take_pseudo = {
       val p = eval_state.pseudo; update_pseudo(Val.Bottom);
-      assert(p != null); p
+      assert(p != null); p.get
     }
     @inline def update_pseudo(p: Val_) = {
       assert(!(p exists {_.typ == VOID}))
-      eval_state = eval_state.update(pseudo_ = p)
+      eval_state = eval_state.update(pseudo_ = Some(p))
     }
     
     @inline def lookup(reg:Var.Register_) : Val_ = tracef getOrElse (reg, {
@@ -582,7 +584,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !ins.opcode.isInstanceOf[Branches]) {
-      log('debug) ("Instruction: "+ins)
+      log('debug) (ins toString)
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
        * TODO:
@@ -716,7 +718,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           val new_obj = obj eval_ ((v:VAL[OBJECT]) =>
             // Unknown for Object is actually also an Instance
             v.asInstanceOf[OBJECT#Instance] ~~ (_.monitored_=(monitored)))
-          tracef = tracef +# (srcs(1), new_obj)
+          tracef = tracef +# (srcs(0), new_obj)
         
         /** Allocation **/
         case code:Allocate =>
@@ -734,6 +736,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                            code+"\n"+
                            cst+"\n"+
                            srcs)
+              throw new RuntimeException("FILLED_NEW_ARRAY not implemented yet!")
               Val.Unknown(resultT)
             }
           }
@@ -752,9 +755,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 else Val.Unknown(typ)
             case INSTANCE_OF => result = {
               obj eval ((v: VAL[Instantiable]) => v.isValueOf(typ) match {
-                case Tri.T => Val.Atom(BOOLEAN.TRUE)
-                case Tri.U => Val.Unknown(BOOLEAN)
-                case Tri.F => Val.Atom(BOOLEAN.FALSE)
+                case Tri.T => BOOLEAN.TRUE
+                case Tri.U => BOOLEAN.unknown
+                case Tri.F => BOOLEAN.FALSE
               })
             }
           }
@@ -775,6 +778,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                        cst+"\n"+
                        srcs+"\n"+
                        operands)
+          throw new RuntimeException("FILL_ARRAY_DATA not implemented yet!")
         
         /** Calls **/
         case code:Call =>
@@ -849,7 +853,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 }
                 catch {
                   case e:StackOverflowError =>
-            	    log('warn) ("Stack overflow when attempting to call "+m+" from "+meth)
+            	    log('error) ("Stack overflow when attempting to call "+m+" from "+meth+"\n"+
+            	                 "Consider increasing the JVM's stack size with -Xss#")
+            	    if(!opts.continueOnOverflow) throw e
             	    call_unknown(retT)
                 }
             }
@@ -899,6 +905,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       // Assign phase
       if(!ins.opcode.isInstanceOf[NoResult] && sink != None) {
         assert(result != null)
+        log('debug) ("Result: "+result)
         def dependize[T <: Instantiable](v: VAL[T]): VAL[T] = v match {
           case v.typ.Unknown => v
           case v_ : T#Instance => v_.clone(cdeps)
@@ -906,8 +913,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         def dependize_(v: VAL_) = dependize[Instantiable](v)
         tracef = tracef +# (sink.get, result eval dependize_)
       }
-      if(sink != None)
-        assert(result != null)
       /*
        *  Even if it's NoResult, we may propagate the result via eval_state.pseudo, i.e.
        *  for a move-result-pseudo
@@ -929,7 +934,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
-      return trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
+      assert(!br.opcode.isInstanceOf[End])
+      trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
+      return
     }
     else br.opcode match {
       // No successors
@@ -956,7 +963,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       // FIXME: What do we do if there's more than one catch?
       case _ =>
         // Either we branched because we branch or because we catch
-        assert((br.catchTs.size == 1) ^ br.opcode.isInstanceOf[Branches],
+        assert((br.catchTs.size > 0) ^ br.opcode.isInstanceOf[Branches],
                (br.catchTs.size, br.opcode.isInstanceOf[Branches]))
         assert(bb.successors.size > 1)
         
@@ -988,36 +995,57 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               log('debug) ("Induced unknowns for looping cleanup")
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupDone =>
-              log('debug) ("Done cleaning up")
-              return // Done cleaning up so stop
+              log('debug) ("Done cleaning up loop")
           }
         }
         
-        if(phase != TracePhase.None)
+        if(phase != TracePhase.None && phase != TracePhase.CleanupDone)
           bbtracePhases(header) = advancePhase(phase, bbtracer, opts.loopingFuel, log('debug))
         
+        log('debug) ("Possible successors: "+bb.successors)
+        
+        // Test for successors of bb which could possibly be reached (given tracef_ and static_env_)
         /** Used to refine the environment based on the path */
         final case class BranchMonad(tracef: TraceFrame = tracef_,
-                                     cdeps: Val_ = cdeps) extends Immutable with NotNull
-        
+                                     cdeps: Val_ = cdeps,
+                                     eval_state: BBEvalState = eval_state) extends Immutable with NotNull
         val reach = mutable.Map[BB, BranchMonad]()
-        // Test for successors of bb which could possibly be reached (given tracef_ and static_env_)
         
         // Do we catch a thrown exception?
         if(bb.canCatch) {
-          var catches = false
+          val couldHandle = mutable.Map[BB, mutable.Set[Exceptional]]()
+          if(opts.debug) {
+            log('debug) ("Handlers: "+bb.handlers)
+            for(handler <- bb.handlers)
+              log('debug) ("Handler "+handler+" uses "+handler.first_ins)
+          }
           for(i <- 0 until br.catchTs.size;
-              t = Type(br.catchTs.getType(i)))
+              t = Type(br.catchTs.getType(i))) {
             for(u <- uncaught)
               (t > u) match {
                 case Tri.F => // Do nothing
                 case tri   =>
-                  catches = true
+                  val handlers = bb.handlersFor(t)
+                  if(handlers.isEmpty)
+                    log('debug) ("No handlers for "+t)
+                  for(handler <- handlers) {
+                    if(!(couldHandle contains handler))
+                      couldHandle += ((handler, mutable.Set()))
+                    couldHandle(handler) += u
+                  }
                   // We can confirm we catch it
                   if(tri == Tri.T)
                     uncaught -= u
               }
-          if(catches) reach += ((bb.alt_succ, BranchMonad()))
+          }
+          log('debug) ("Handling configuration: "+couldHandle)
+          for((handler, exnTs) <- couldHandle) {
+            val vexn = Val.Unknown(exnTs)
+            reach += ((handler, BranchMonad(eval_state = eval_state.update(error_ = Some(vexn)))))
+          }
+          // Besides handlers, we could also follow the normal flow of execution
+          for(succ <- (bb.successors filterNot (bb.handlers contains _)))
+            reach += ((succ, BranchMonad()))
         }
         
         // Handle branches (except for End-branches, which we did above)
@@ -1164,6 +1192,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             
             if(!redundant) tmp += s
             else {
+              log('debug) ("Taking "+s+" looks to be redundant")
               val next_header = (bbtracer :+ s).preheader :+ s
               bbtracePhases get next_header match {
                 case Some(TracePhase.Step) | Some(TracePhase.CleanupStart) =>
@@ -1175,13 +1204,22 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           tmp
         }
-        log('debug) ("Can branch to: "+branch_set)
+        
+        // FIXME: This is probably incorrect, and just an issue with e.g. phasing
+        if(branch_set.isEmpty) {
+          log('debug) ("Branching set empty, so summarizing with uncaught exceptions")
+          fsummarize_u(uncaught.toSeq:_*)
+          return
+        }
+        else {
+          log('debug) ("Will branch to: "+branch_set)
+        }
         
         //val futures =
           for(s <- branch_set)
             /*yield future(*/trace_bb(s, bbtracer,
                                       uncaught_,
-                                      eval_state,
+                                      reach(s).eval_state,
                                       static_env_,
                                       reach(s).tracef,
                                       heap_)(reach(s).cdeps)//)
@@ -1194,9 +1232,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   
   trace_bb(meth.firstBlock,
            Tracer(), immutable.Set(),
-           BBEvalState(0, Val.Bottom, Val.Bottom, Val.Bottom),
+           BBEvalState(0, None, None, None),
            findex.static_env, new TraceFrame, findex.heap)(cdeps)//.result
-  assert((fsummaries contains meth) && (fsummaries(meth) contains findex))
+  assert((fsummaries contains meth))
+  assert((fsummaries(meth) contains findex))
   
   return fsummaries(meth)(findex)
   } // End trace_

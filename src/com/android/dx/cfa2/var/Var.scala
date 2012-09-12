@@ -66,11 +66,11 @@ object Var {
     }
     
     /** Indexed by heap-tokens */
-    abstract case class RawHeap[+T <: Instantiable](final val heapToken: Long) extends Heap[T] {
+    abstract case class RawHeap[+T <: RefType](final val heapToken: Long) extends Heap[T] {
       type Source = Long
       final val src = heapToken
     }
-    type RawHeap_ = RawHeap[Instantiable]
+    type RawHeap_ = RawHeap[RefType]
     
     /** Field of an object (be it a class or an instance) */
     sealed abstract class Field[+T <: Instantiable, Spec <: FieldSpec] (val spec: Spec)

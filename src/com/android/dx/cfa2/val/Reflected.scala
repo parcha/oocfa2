@@ -48,7 +48,7 @@ object Reflected {
   def apply[ET](eigenval: ET) : Option[R forSome {type R <: Reflected[ET]}] =
     apply[ET](eigenval.getClass.asInstanceOf[Class[ET]])
   
-  implicit def reflect[ET](v:ET) : R#Instance forSome {type R <: Reflected[ET]} =
+  def reflect[ET](v:ET) : R#Instance forSome {type R <: Reflected[ET]} =
     apply[ET](v).get.instance(v, Val.Bottom)
   implicit def lift[ET, R <: Reflected[ET]](refl:R#Instance) : ET = refl.self
 }

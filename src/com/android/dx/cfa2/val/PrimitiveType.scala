@@ -25,8 +25,13 @@ extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBePa
       case Some(cache) => cache 
     }
   }
-  /** Subclasses should override if they want to cache certain values */
-  protected[this] def cacheHook(self:V, deps: Val_) : Option[Instance] = None
+  /** Subclasses should override this partial function if they want to cache certain values */
+  protected[this] def cacheHook: PartialFunction[V, Instance] = null
+  /** Subclasses should override if they want to cache certain values, even with deps */
+  protected[this] def cacheHook(self:V, deps: Val_) : Option[Instance] =
+    if(deps != Val.Bottom) None // Only cache fresh values
+    else if(cacheHook != null) (cacheHook.lift)(self)
+    else None
   
   protected[this] final val constructor = new Instance(_, _)
   protected[this] final class Instance_(params: IParams, deps:Val_)
@@ -39,12 +44,10 @@ object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
   protected def false_(deps: Val_) = instance(false, deps)
   val TRUE  = true_(Val.Bottom)
   val FALSE = false_(Val.Bottom)
-  protected[this] override def cacheHook(self:Boolean, deps: Val_)  =
-    if(deps != Val.Bottom) None
-    else self match {
-      case true  => Some(TRUE)
-      case false => Some(FALSE)
-    }
+  override protected[this] def cacheHook = {
+    case true  => TRUE
+    case false => FALSE
+  }
   implicit def asInt(inst:Instance) = if(inst.self) 1 else 0
 }
 object BYTE extends ValuedType[Byte](RawType.BYTE) with Type.Integral {
@@ -69,13 +72,12 @@ object INT extends ValuedType[Int](RawType.INT) with Type.Integral {
   implicit def asBoolean(inst:Instance) = inst.self!=0
   val ZERO = instance(0, Val.Bottom)
   val ONE  = instance(1, Val.Bottom)
-  protected[this] override def cacheHook(self:Int, deps: Val_) =
-    if(deps != Val.Bottom) None
-    else self match {
-      case 0 => Some(ZERO)
-      case 1 => Some(ONE)
-      case _ => None
-    }
+  val NEG_ONE = instance(-1, Val.Bottom)
+  override protected[this] def cacheHook = {
+    case 0  => ZERO
+    case 1  => ONE
+    case -1 => NEG_ONE
+  }
 }
 object LONG extends ValuedType[Long](RawType.LONG) with Type.Integral {
   //protected val _V = manifest[Long]
