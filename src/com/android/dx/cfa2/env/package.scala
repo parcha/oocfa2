@@ -23,7 +23,7 @@ package object env {
       loopDependent ++= (this.keys filter (!prev.contains(_))) map (this(_))
       assert ((prev.keys filter (!this.contains(_))).isEmpty)
       for(v <- this.values)
-        if(v.asSet exists (_.dependsUpon(loopDependent, cdeps) != Tri.F))
+        if(v.asSet exists (_.dependsUpon(loopDependent ++ immutable.Set(cdeps)) != Tri.F))
           loopDependent += v
       val toInduce: mutable.Map[VarT, Val_] = mutable.Map()
       for((k, vs) <- this)

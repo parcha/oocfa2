@@ -29,25 +29,26 @@ import scala.annotation.unchecked.uncheckedStable
 
 object CFA2Analysis {
   
-  class Opts protected[CFA2Analysis] () extends Immutable with NotNull {
-    val single_threaded: Boolean = false
-    val debug: Boolean = true
+  abstract class Opts protected[CFA2Analysis] extends Immutable with NotNull {
+    def single_threaded: Boolean
+    def debug: Boolean
     // In seconds
-    val timeout: Long = 60
-    val recursionFuel = 2
-    val loopingFuel = 0
+    def timeout: Int
+    def recursionFuel: Int
+    def loopingFuel: Int
+    def outPath: String
     
-    protected def mkLog(sym: Symbol, primary: Logger) = {
-      val toFile = new FileLogger(sym.name+".log")
-      (sym, new DualLogger(primary, toFile))
-    }
-    protected[this] val logs = immutable.Map(
+    protected def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
+    protected def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
+      (sym, new DualLogger(primary, mkLog(sym)._2))
+      
+    protected[this] def logs = immutable.Map(
       mkLog('out, new PrintLogger(System.out)),
       mkLog('info, new PrintLogger(System.err)),
       mkLog('warn, new PrintLogger(System.err)),
       mkLog('debug, new ConditionalLogger(debug, new PrintLogger(System.out))),
       mkLog('error, new PrintLogger(System.err)))
-    val log = new Opts.Loggers(logs)
+    lazy val log = new Opts.Loggers(logs)
     
     val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
   }
@@ -56,8 +57,6 @@ object CFA2Analysis {
       def apply(l: Symbol) = logs(l)
     }
   }
-  
-  lazy val defaultOpts = new Opts
   
   final case class Results() extends Immutable
   
@@ -543,42 +542,39 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     var uncaught = _uncaught
     
-    @inline
-    def take_param_index = {
+    @inline def take_param_index = {
       val i = eval_state.param_index; eval_state = eval_state.update(param_index_ = i+1)
       assert(i < findex.params.length); i
     }
-    @inline
-    def take_retval = {
+    
+    @inline def take_retval = {
       val r = eval_state.retval; update_retval(Val.Bottom);
       assert(r != null); r
     }
-    @inline
-    def update_retval(r: Val_) = eval_state = eval_state.update(retval_ = r)
+    @inline def update_retval(r: Val_) = eval_state = eval_state.update(retval_ = r)
+    
     // Can return null
-    @inline
-    def take_error = {
+    @inline def take_error = {
       val e = eval_state.error; update_error(Val.Bottom); e
     }
-    @inline
-    def update_error(e: Val[Exceptional]) = eval_state = eval_state.update(error_ = e)
-    @inline
-    def take_pseudo = {
+    @inline def update_error(e: Val[Exceptional]) = eval_state = eval_state.update(error_ = e)
+    
+    @inline def take_pseudo = {
       val p = eval_state.pseudo; update_pseudo(Val.Bottom);
       assert(p != null); p
     }
-    @inline
-    def update_pseudo(p: Val_) = eval_state = eval_state.update(pseudo_ = p)
+    @inline def update_pseudo(p: Val_) = {
+      assert(!(p exists {_.typ == VOID}))
+      eval_state = eval_state.update(pseudo_ = p)
+    }
     
-    @inline
-    def lookup(reg:Var.Register_) : Val_ = tracef getOrElse (reg, {
+    @inline def lookup(reg:Var.Register_) : Val_ = tracef getOrElse (reg, {
       log('debug) ("Failed to find value for "+reg)
       Val.Unknown(reg.typ)
     })
-    @inline
-    def fsummarize_r(ret: RetVal) = summarize(meth, findex, bbtracer encode, ret)
-    @inline
-    def fsummarize_u(uncaught: Exceptional*) = summarize(meth, findex, bbtracer encode, uncaught)
+    
+    @inline def fsummarize_r(ret: RetVal) = summarize(meth, findex, bbtracer encode, ret)
+    @inline def fsummarize_u(uncaught: Exceptional*) = summarize(meth, findex, bbtracer encode, uncaught)
     
     var result :Val_ = Val.Bottom
     val insns = bb.getInsns
@@ -586,7 +582,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !ins.opcode.isInstanceOf[Branches]) {
-      log('debug) (ins.toHuman)
+      log('debug) ("Instruction: "+ins)
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
        * TODO:
@@ -753,7 +749,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               // TODO: How do we lift the cast knowledge?
               result =
                 if(Tri._all(sat)) obj
-                else Val.Unknown(resultT)
+                else Val.Unknown(typ)
+              update_pseudo(result)
             case INSTANCE_OF => result = {
               obj eval ((v: VAL[Instantiable]) => v.isValueOf(typ) match {
                 case Tri.T => Val.Atom(BOOLEAN.TRUE)
@@ -823,6 +820,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           
           @inline
           def call_unknown(retT: Instantiable) = {
+            log('debug) ("Call unknown...")
             val params = mkparams(operands).toSeq
             val hookRets = (umethod_hooks map (_(spec, params))).flatten
             val result =
@@ -833,7 +831,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           @inline
           def call_known(m: Method, retT: Instantiable) = {
-            var params = mkparams(operands).toSeq
+            log('debug) ("Call known...")
+            val params = mkparams(operands).toSeq
             val next_header = (mtracer.preheader :+ m).preheader :+ m
             val next_phase = mtracePhases get next_header
             next_phase match {
@@ -861,7 +860,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case INVOKE_STATIC =>
               val retT = Type(spec.getPrototype.getReturnType).asInstanceOf[Instantiable]
               methodForSpec(spec) match {
-                case None  => call_unknown(retT)
+                case None    => call_unknown(retT)
                 case Some(m) => call_known(m, retT)
               }
             // FIXME: INVOKE_SUPER needs to actually call the super-method
@@ -908,8 +907,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         def dependize_(v: VAL_) = dependize[Instantiable](v)
         tracef = tracef +# (sink.get, result eval dependize_)
       }
-      if(sink != None)
+      if(sink != None) {
         assert(result != null)
+        update_pseudo(result)
+      }
       /*
        *  Even if it's NoResult, we may propagate the result via eval_state.pseudo, i.e.
        *  for a move-result-pseudo
@@ -930,7 +931,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
       // We may be implicitly branching for a catch; get ready for a move-result-pseudo
-      update_pseudo(result)
+      //update_pseudo(result)
       return trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
     }
     else br.opcode match {
@@ -973,11 +974,11 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           else TracePhase.None
         })
         log('debug) ("BBPhase is: "+phase)
+        assert(phase < TracePhase.CleanupDone)
         
         // If we're in an applicable phase, are a join point, and have looped...
-        if(phase > TracePhase.Init &&
-           bb.predecessors.size > 1 && _bbtracer.contains(bb)) {
-          assert(phase < TracePhase.CleanupDone)
+        if(phase > TracePhase.Init /*&&
+           bb.predecessors.size > 1 && _bbtracer.contains(bb)*/) {
           phase match {
             case TracePhase.Step =>
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)

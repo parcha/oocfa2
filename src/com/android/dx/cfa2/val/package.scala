@@ -3,7 +3,6 @@ package com.android.dx.cfa2
 import com.android.dx
 import dx.cfa2
 import cfa2._
-import CFA2Analysis.singleton.opts.log
 import tlc._
 import Algebra._
 
@@ -41,18 +40,6 @@ package object `val` {
   
   def makeUnknowns(types: Seq[Instantiable]) : Seq[Val[Instantiable]] =
     for(t <- types) yield Val.Unknown(t)
-  
-  // FIXME: What should this do wrt arrays?
-  def reflectClass(name: String) : Option[Class[_]] =
-    try Some(AnalysisClassLoader.loadClass(name))
-    catch {
-      case _:ClassNotFoundException =>
-        log('warn) ("Couldn't find class for reflection: "+name)
-        None
-      case e:NoClassDefFoundError =>
-        log('warn) ("In attempting to load "+name+" for reflection, a depedency could not be found: "+e.getMessage)
-        None
-    }
   
   // TODO: Hack for the non-existence of isNull for Unknown
   final def isPossiblyNull(v: VAL[RefType]) = v match {

@@ -129,7 +129,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
   //lazy val Interfaces = 
   
   final val className = descriptorMatch.group("classname").replace('/', '.')
-  final val klass = reflectClass(className) match {
+  final val klass = BuiltinAnalysisClassLoader.reflectClass(className) match {
     case None    => null
     case Some(c) => c
   }

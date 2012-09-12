@@ -51,8 +51,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
         val set = for(v <- vs.asSet) yield dependsUpon(v)
         Tri.any(set)
     }
-    /** extraDeps is for e.g. control dependencies */
-    final def dependsUpon(vs: GenIterable[Val_], extraDeps: Val_) : Tri =
+    final def dependsUpon(vs: GenIterable[Val_]) : Tri =
       Tri.any(vs map dependsUpon)
   }
   /**

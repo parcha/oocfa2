@@ -16,6 +16,8 @@ sealed case class Instruction(val raw:RawInsn) extends Immutable with NotNull {
   def resultT = operation.resultType
   def catchTs = raw.getCatches
   def branches = (catchTs.size > 0) || opcode.isInstanceOf[ROpCodes.Branches]
+  def position = raw.getPosition
+  override lazy val toString = raw.toHuman
 }
 object Instruction {
   // TODO: does this need to be threadsafe? Do we even need it?

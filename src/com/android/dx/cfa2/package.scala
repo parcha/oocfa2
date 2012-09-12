@@ -122,20 +122,39 @@ package object cfa2 {
   type IMethodSpec = MethodSpec
   type SMethodSpec = MethodSpec
   
-  /* ============= Class loading/lifting hackery =========== */
+  /* ============= Class-loading/lifting hackery =========== */
   import java.net.{URLClassLoader, URL}
-  import java.io.File
-  // TODO: Allow the user to configure the searched URLs on the CLI
-  val analysisClasspath : immutable.Seq[File] = immutable.Seq(
-    "../../../..", "."
-  ) /*++ System.getProperty("java.class.path").split(":")*/ map (new File(_))
-  assert(analysisClasspath forall (_.exists))
-  object AnalysisClassLoader extends URLClassLoader((analysisClasspath map (_.toURL)).toArray,
-                                                    ClassLoader.getSystemClassLoader) {
-    /*protected override def findClass(name: String) {
-      
-    }*/
+  class AnalysisClassLoader(parent: ClassLoader, urls: Iterable[URL] = List())
+  extends URLClassLoader(urls.toArray, parent) {
+    
+    def reflectClass(name: String) : Option[Class[_]] =
+      try Some(loadClass(name))
+      catch {
+        case _:ClassNotFoundException =>
+          warn("Couldn't find class for reflection: "+name)
+          None
+        case e:NoClassDefFoundError =>
+          warn("In attempting to load "+name+" for reflection, a depedency could not be found: "+e.getMessage)
+          None
+      }
+    
+    private[cfa2] def +=(url: URL) = super.addURL(url)
+    
+    private[cfa2] def registerRawClass(name: String, data: Array[Byte]) =
+      defineClass(name, data, 0, data.length)
+    
+    protected[this] def warn(msg:String) =
+      // FIXME: HACK: for now, we just pull the singleton and warn that way
+      CFA2Analysis.singleton.opts.log('warn)(msg)
   }
+  
+  import java.io.File
+  val analysisClasspath : immutable.Seq[File] = immutable.Seq(
+    "."
+  ) map (new File(_))
+  assert(analysisClasspath forall (_.exists))
+  object BuiltinAnalysisClassLoader extends AnalysisClassLoader(ClassLoader.getSystemClassLoader,
+                                                                (analysisClasspath map (_.toURL)))
   
   /* ============ Hooks ================== */
   import `val`.IParams
