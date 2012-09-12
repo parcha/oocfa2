@@ -750,7 +750,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               result =
                 if(Tri._all(sat)) obj
                 else Val.Unknown(typ)
-              update_pseudo(result)
             case INSTANCE_OF => result = {
               obj eval ((v: VAL[Instantiable]) => v.isValueOf(typ) match {
                 case Tri.T => Val.Atom(BOOLEAN.TRUE)
@@ -907,10 +906,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         def dependize_(v: VAL_) = dependize[Instantiable](v)
         tracef = tracef +# (sink.get, result eval dependize_)
       }
-      if(sink != None) {
+      if(sink != None)
         assert(result != null)
-        update_pseudo(result)
-      }
       /*
        *  Even if it's NoResult, we may propagate the result via eval_state.pseudo, i.e.
        *  for a move-result-pseudo
@@ -926,12 +923,12 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast
     log('debug) ("Ending on "+br.toHuman)
-    
+    // We may be implicitly branching for a catch; get ready for a move-result-pseudo
+    if(!br.opcode.isInstanceOf[Branches])
+      update_pseudo(result)
     
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
-      // We may be implicitly branching for a catch; get ready for a move-result-pseudo
-      //update_pseudo(result)
       return trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
     }
     else br.opcode match {
@@ -969,12 +966,12 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         var uncaught_ = uncaught
         
         val header = bbtracer.preheader :+ bb
-        var phase = bbtracePhases getOrElse (header, {
+        val phase = bbtracePhases getOrElse (header, {
           if(bb.mayLoop) TracePhase.Init
           else TracePhase.None
         })
         log('debug) ("BBPhase is: "+phase)
-        assert(phase < TracePhase.CleanupDone)
+        //assert(phase < TracePhase.CleanupDone)
         
         // If we're in an applicable phase, are a join point, and have looped...
         if(phase > TracePhase.Init /*&&
@@ -990,6 +987,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               // TODO what about uncaught?
               log('debug) ("Induced unknowns for looping cleanup")
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
+            case TracePhase.CleanupDone =>
+              log('debug) ("Done cleaning up")
+              return // Done cleaning up so stop
           }
         }
         
@@ -1133,7 +1133,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         }
         val branch_set =
           if(phase < TracePhase.Step) reach.keys
-          else if(phase == TracePhase.CleanupDone) immutable.Set() // We're done, so stop
           else {
           val tmp: mutable.Set[BB] = mutable.Set()
           for(s <- reach.keys) {
