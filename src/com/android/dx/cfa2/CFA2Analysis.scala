@@ -932,41 +932,45 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     if(!br.opcode.isInstanceOf[Branches])
       update_pseudo(result)
     
+    @inline def handle_end() = {
+      assert(br.opcode.isInstanceOf[MayEnd])
+      val retv = br.opcode match {
+        case RETURN =>
+          val value = br.sources.size match {
+            // Void return
+            case 0 => Val.Atom(VOID.singleton)
+            case 1 => lookup(Var.Register(br.sources.get(0)))
+          }
+          RetVal.Return(value)
+        case THROW =>
+          // FIXME: We may end up immediately catching this, so it's inappropriate to summarize like this
+          val err = lookup(Var.Register(br.sources.get(0))).asInstanceOf[Val[Exceptional]]
+          update_error(err)
+          RetVal.Throw(err)
+      }
+      fsummarize_u(uncaught.toSeq :_*)
+      fsummarize_r(retv)
+    }
+      
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
-      assert(!br.opcode.isInstanceOf[End])
+      // FIXME: check to see if this is correct
+      if(br.opcode.isInstanceOf[MayEnd]) handle_end()
       trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
       return
     }
+    else if(bb.successors.size == 0) { handle_end(); return }
     else br.opcode match {
-      // No successors
-      case code:End =>
-        assert(bb.successors.size == 0)
-        log('debug) ("Sources: "+br.sources)
-        val retv = code match {
-          case RETURN =>
-            val value = br.sources.size match {
-              // Void return
-              case 0 => Val.Atom(VOID.singleton)
-              case 1 => lookup(Var.Register(br.sources.get(0)))
-            }
-            RetVal.Return(value)
-          case THROW =>
-            val err = lookup(Var.Register(br.sources.get(0))).asInstanceOf[Val[Exceptional]]
-            RetVal.Throw(err)
-        }
-        fsummarize_u(uncaught.toSeq :_*)
-        fsummarize_r(retv)
-        return
-        
+      // TODO: No need to match on br anymore; unindent this
       // Strictly branching, with multiple possible branches
-      // FIXME: What do we do if there's more than one catch?
       case _ =>
         // Either we branched because we branch or because we catch
-        assert((br.catchTs.size > 0) ^ br.opcode.isInstanceOf[Branches],
+        assert((br.catchTs.size > 0) || br.opcode.isInstanceOf[Branches],
                (br.catchTs.size, br.opcode.isInstanceOf[Branches]))
-        assert(bb.successors.size > 1)
         
+        // FIXME: check to see if this is correct
+        if(br.opcode.isInstanceOf[MayEnd]) handle_end()
+               
         var static_env_ = static_env
         var tracef_ = tracef
         var heap_ = heap
@@ -1044,8 +1048,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             reach += ((handler, BranchMonad(eval_state = eval_state.update(error_ = Some(vexn)))))
           }
           // Besides handlers, we could also follow the normal flow of execution
-          for(succ <- (bb.successors filterNot (bb.handlers contains _)))
-            reach += ((succ, BranchMonad()))
+          bb.prim_succ match {
+            case Some(succ) => reach += ((succ, BranchMonad()))
+            case None       =>
+          }
         }
         
         // Handle branches (except for End-branches, which we did above)
@@ -1137,9 +1143,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 BranchMonad(tracef, cdeps_)
               }
               
-              if(!(primSet1 isEmpty)) reach += ((bb.prim_succ, refineBranch(true)))
+              if(!(primSet1 isEmpty)) reach += ((bb.prim_succ.get, refineBranch(true)))
               else log('debug) ("True branch not taken")
-              if(!(altSet1 isEmpty)) reach += ((bb.alt_succ, refineBranch(false)))
+              if(!(altSet1 isEmpty)) reach += ((bb.alt_succ.get, refineBranch(false)))
               else log('debug) ("False branch not taken")
               //End IF
             
@@ -1152,7 +1158,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               reach ++= (bb.successors map ((_, bm)))
           }
         }
-        log('debug) ("Can reach: "+reach+" out of "+bb.successors)
+        log('debug) ("Can reach: "+reach.keys+" out of "+bb.successors)
         
         if(reach.isEmpty) {
           // We've reached the end of a trace of execution
@@ -1160,7 +1166,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           return
         }
         val branch_set =
-          if(phase < TracePhase.Step) reach.keys
+          // FIXME: TracePhase.None shouldn't be a problem... so why do we have to check it?
+          if(phase != TracePhase.None && phase < TracePhase.Step) reach.keys
           else {
           val tmp: mutable.Set[BB] = mutable.Set()
           for(s <- reach.keys) {

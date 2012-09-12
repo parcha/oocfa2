@@ -33,8 +33,14 @@ final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends 
       (for(i <- 0 until succs.size) yield parent.blocks(succs.get(i))).toSet)
   }
   
-  lazy val alt_succ = successors(raw.getSecondarySuccessor)
-  lazy val prim_succ = successors(raw.getPrimarySuccessor)
+  lazy val alt_succ = raw.getSecondarySuccessor match {
+    case -1 => None
+    case n  => Some(successors(n))
+  }
+  lazy val prim_succ = raw.getPrimarySuccessor match {
+    case -1 => None
+    case n  => Some(successors(n))
+  }
   
   def first_ins: Instruction = raw.getFirstInsn
   def last_ins: Instruction = raw.getLastInsn

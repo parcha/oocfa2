@@ -329,11 +329,12 @@ object ROpCodes extends Enumeration(1) {
   val TO_CHAR = new IntegralConversion((i)=> i & 0xFFFF)
   val TO_SHORT = new IntegralConversion((i)=> (i << 16) >> 16)
   
-  sealed class End private[ROpCodes](arity:Int) extends OpCode(arity) with Branches
+  sealed trait MayEnd extends OpCode
+  sealed trait End extends OpCode with MayEnd
   
-  val RETURN = new End(-2)
+  val RETURN = new OpCode(-2) with End
   val ARRAY_LENGTH = new OpCode(1)
-  val THROW = new OpCode(1) with Branches
+  val THROW = new OpCode(1) with MayEnd
   
   sealed class Monitor private[ROpCodes] extends OpCode(1) with NoResult with OnObject
   val MONITOR_ENTER = new Monitor
