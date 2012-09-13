@@ -21,13 +21,19 @@ class PrintLogger(ps:PrintStream) extends Logger {
 }
 class FileLogger(f:File) extends Logger {
   def this(name:String) = this(new File(name))
-  private[this] val ps = new PrintStream(f)
+  protected[this] val ps = new PrintStream(f)
   override def log(s:String) = 
     try ps println s
     catch {
       case e:IOException => e printStackTrace
       case e:Exception => throw e
     }
+}
+class CompressedFileLogger(f:File) extends FileLogger(f) {
+  def this(name:String) = this(new File(name+".gz"))
+  import java.util.zip._
+  override protected[this] val ps =
+    new PrintStream(new GZIPOutputStream(new FileOutputStream(f)))
 }
 class NullaryLogger extends Logger {
   override def log(s:String) = {}

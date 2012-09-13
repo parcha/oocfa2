@@ -47,7 +47,7 @@ object CFA2Analysis {
       mkLog('out, new PrintLogger(System.out)),
       mkLog('info, new PrintLogger(System.err)),
       mkLog('warn, new PrintLogger(System.err)),
-      mkLog('debug, new ConditionalLogger(debug, new PrintLogger(System.out))),
+      ('debug, new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))),
       mkLog('error, new PrintLogger(System.err)))
     lazy val log = new Opts.Loggers(logs)
     
@@ -184,6 +184,9 @@ object CFA2Analysis {
   
   lazy val singleton = {assert(_singleton != null); _singleton}
   private var _singleton : CFA2Analysis[Opts] = null
+  
+  // Global, hackish convenience
+  def log(sym:Symbol)(s:String) = singleton.opts.log(sym)(s)
 }
 
 /**
@@ -382,10 +385,14 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
    * E.g., we can't do STM, so we can't safely concurrently merge fsummaries
    */
   protected[this] type EvalWorklist = mutable.Map[Method, Boolean] 
-  protected[this] val eval_worklist: EvalWorklist = mutable.Map((
-      for(m <- methodMap.seq.keys
-          if opts.starting_points exists {(ider:MethodIDer) => +(ider identifies m)})
-        yield (m, false)).toSeq :_*)
+  protected[this] val eval_worklist: EvalWorklist = {
+    // Use an ordered map so as to give a semblance of determinism
+    val build = new mutable.LinkedHashMap[Method, Boolean]()
+    for(m <- methodMap.seq.keys.toSeq.sortBy(_.name)
+        if opts.starting_points exists {(ider:MethodIDer) => +(ider identifies m)})
+      build += ((m, false))
+    build
+  }
   
   /*
    *  TODO: What should be the return value here?
@@ -509,7 +516,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       if(!bbeffects.contains(bb))
         bbeffects += ((bb, new MutableConcurrentMap))
       val effect = BBEffect(static_env_out, tracef_out, heap_out, uncaught_out)
-      log('debug) ("New BBEffect for "+trace+"\n"+effect)
+      //log('debug) ("New BBEffect for "+trace+"\n"+effect)
       bbeffects(bb) += ((trace, effect))
     }
     
@@ -583,7 +590,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     // All but the branching instruction
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
-        if !ins.opcode.isInstanceOf[Branches]) {
+        if !(ins.opcode.isInstanceOf[Branches] ||
+             ins.opcode.isInstanceOf[MayEnd])) {
       log('debug) (ins toString)
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
@@ -789,7 +797,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               val done: mutable.Set[Val[T]] = mutable.Set()
               val noneed: mutable.Set[VAL[T]] = mutable.Set()
               for(v <- vs.asSet)
-                if(v.typ.isInstanceOf[OBJECT]) {
+                if(v.typ.isInstanceOf[OBJECT] && !v.typ.isGhost) {
                   val v_ = v.asInstanceOf[OBJECT#Instance]
                   done += (~v_).asInstanceOf[Val[T]]
                 } else {
@@ -955,7 +963,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     // Special hotpath for unambiguous succession; also subsumes GOTO
     if(bb.successors.size == 1) {
       // FIXME: check to see if this is correct
-      if(br.opcode.isInstanceOf[MayEnd]) handle_end()
+      if(br.opcode.isInstanceOf[MayEnd]) {
+        assert(!br.opcode.isInstanceOf[End])
+        handle_end()
+      }
       trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
       return
     }
@@ -1000,6 +1011,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupDone =>
               log('debug) ("Done cleaning up loop")
+              return
           }
         }
         
@@ -1199,7 +1211,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             
             if(!redundant) tmp += s
             else {
-              log('debug) ("Taking "+s+" looks to be redundant")
+              log('debug) ("Taking "+s+" looks to be redundant; first instruction: "+s.first_ins)
               val next_header = (bbtracer :+ s).preheader :+ s
               bbtracePhases get next_header match {
                 case Some(TracePhase.Step) | Some(TracePhase.CleanupStart) =>
@@ -1223,7 +1235,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         }
         
         //val futures =
-          for(s <- branch_set)
+          // Use a sorted representation here for determinism
+          for(s <- branch_set.toSeq.sortBy(_.label))
             /*yield future(*/trace_bb(s, bbtracer,
                                       uncaught_,
                                       reach(s).eval_state,

@@ -22,7 +22,9 @@ trait Reflected[ET] extends Instantiable {
   final def instance(self:EigenType) : Instance = instance(self, Val.Bottom)
   implicit final def deconstruct(inst: Self#Instance) = inst.self
   
-  instance_param[ET]('self, {_!=null})
+  protected[this] val default: ET
+  
+  instance_param_[ET]('self, default, {_!=null})
   protected[this] trait Instance_ extends super.Instance_ { _:Instance =>
     final lazy val self = param[ET]('self) 
   }

@@ -21,6 +21,9 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   //type Self <: this.type
   final type Self = this.type
   
+  /** Some "instantiables" aren't actually usable (*cough*void*cough*) **/
+  val isGhost = !this.isInstanceOf[CanBeParam]
+  
   /**
    * Represents a value of this type. They must be referentially distinct within the
    * abstract interpretation so that they can be individually and uniquely tracked.
@@ -90,7 +93,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   protected abstract class Instance_(protected[this] final var params: IParams,
                                      protected[this] final val deps: Val_) extends self.Value { _:Instance =>
     private var _origin: Option[self.Instance] = None
-    def origin = _origin
+    def origin = {assert(_origin != this); _origin}
     
     protected final def param[T](sym: Symbol): T = iparamRegistry(sym).convert(
       params.get(sym) match {

@@ -10,7 +10,8 @@ final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends 
   def label = raw.getLabel
   lazy val canCatch = raw.hasExceptionHandlers
   
-  lazy val mayLoop : Boolean = {
+  // FIXME: Conservatively assume all may loop, in case this logic is wrong
+  lazy val mayLoop : Boolean = true/*{
     val traversed: mutable.Set[BasicBlock] = mutable.Set()
     def traverseSuccs(bb: BasicBlock) : Boolean = {
       traversed += bb
@@ -20,7 +21,7 @@ final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends 
       return false
     }
     traverseSuccs(this)
-  }
+  }*/
   
   lazy val predecessors = {
     val preds = parent.rop.labelToPredecessors(label)

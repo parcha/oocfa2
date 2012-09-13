@@ -6,6 +6,7 @@ import dx.rop.code.RopMethod
 
 import dx.cfa2
 import cfa2._
+import `val`._
 import prop.Properties._
 
 import scala.collection._
@@ -13,11 +14,11 @@ import scala.collection._
 sealed trait MethodDesc extends Immutable with NotNull {
   final def name = nat.getName.getString
   def prototype: dx.rop.`type`.Prototype
-  final def arity = prototype.getParameterTypes.size
+  final lazy val arity = argTs.size
   final lazy val argTs =
-    for(i <- 0 until arity)
+    for(i <- 0 until prototype.getParameterTypes.size)
       // TODO: Should this be ParameterFrameTypes?
-      yield cfa2.`val`.Type(prototype.getParameterTypes.get(i))
+      yield Type(prototype.getParameterTypes.get(i)).asInstanceOf[Instantiable]
   
   def parent: dx.rop.cst.CstType
   def nat: dx.rop.cst.CstNat

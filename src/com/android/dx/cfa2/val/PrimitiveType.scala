@@ -40,6 +40,7 @@ extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBePa
 }
 object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
   //protected val _V = manifest[Boolean].erasure
+  protected[this] val default = false
   protected def true_(deps: Val_) = instance(true, deps)
   protected def false_(deps: Val_) = instance(false, deps)
   val TRUE  = true_(Val.Bottom)
@@ -52,24 +53,29 @@ object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
 }
 object BYTE extends ValuedType[Byte](RawType.BYTE) with Type.Integral {
   //protected val _V = manifest[Byte]
+  protected[this] val default = 0.toByte
   implicit val lifter = scala.Numeric.ByteIsIntegral
 }
 object CHAR extends ValuedType[Char](RawType.CHAR) with Type.Integral {
   //protected val _V = manifest[Char]
+  protected[this] val default = '\0'
   implicit val lifter = scala.Numeric.CharIsIntegral
 }
 object DOUBLE extends ValuedType[Double](RawType.DOUBLE) with Type.Fractional {
   //protected val _V = manifest[Double]
+  protected[this] val default = 0.0
   implicit val lifter = scala.Numeric.DoubleIsFractional
 }
 object FLOAT extends ValuedType[Float](RawType.FLOAT) with Type.Fractional {
   //protected val _V = manifest[Float]
+  protected[this] val default = 0f
   implicit val lifter = scala.Numeric.FloatIsFractional
 }
 object INT extends ValuedType[Int](RawType.INT) with Type.Integral {
   //protected val _V = manifest[Int]
   implicit val lifter = scala.Numeric.IntIsIntegral
   implicit def asBoolean(inst:Instance) = inst.self!=0
+  protected[this] val default = 0
   val ZERO = instance(0, Val.Bottom)
   val ONE  = instance(1, Val.Bottom)
   val NEG_ONE = instance(-1, Val.Bottom)
@@ -81,9 +87,11 @@ object INT extends ValuedType[Int](RawType.INT) with Type.Integral {
 }
 object LONG extends ValuedType[Long](RawType.LONG) with Type.Integral {
   //protected val _V = manifest[Long]
+  protected[this] val default = 0L
   implicit val lifter = scala.Numeric.LongIsIntegral
 }
 object SHORT extends ValuedType[Short](RawType.SHORT) with Type.Integral {
   //protected val _V = manifest[Short]
+  protected[this] val default = 0.toShort
   implicit val lifter = scala.Numeric.ShortIsIntegral
 }

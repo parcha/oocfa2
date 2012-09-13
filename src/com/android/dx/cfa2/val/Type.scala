@@ -186,8 +186,10 @@ object Type {
   val OBJECT_ = t.OBJECT_
   val CLASS = t.CLASS
   val STRING = t.STRING
-  val BIG_INT = t.BIG_INT
+  // FIXME: Reenable when the dynamics are fixed
+  /*val BIG_INT = t.BIG_INT
   val BIG_DEC = t.BIG_DEC
+  val LOCALE = t.LOCALE*/
   // Exceptionals
   import t.{Exceptionals => e}
   val Exceptional = new {

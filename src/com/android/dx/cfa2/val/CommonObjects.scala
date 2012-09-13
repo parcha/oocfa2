@@ -17,7 +17,7 @@ object OBJECT_ extends OBJECT(RawType.OBJECT) {
   extends super.Instance_(params, deps) {
     protected[this] final class Ref_ (env: HeapEnv) extends super.Ref_(env)
     type Ref = Ref_
-    val ref = new Ref(_)
+    protected[this] val ref = new Ref(_)
   }
   type Instance = Instance_
 }
@@ -41,10 +41,13 @@ object CLASS extends OBJECT(RawType.CLASS) {
 import java.{lang => J}
 import java.{math => M}
 
-object STRING extends Dynamic[J.String](RawType.STRING)
+object STRING extends Dynamic[J.String](RawType.STRING) {
+  protected[this] val default = new String
+}
 
-object BIG_INT extends Dynamic[M.BigInteger](RawType.intern("Ljava/math/BigInteger;"))
+// FIXME: These objects have no real defaults! The premise of reflection/dynamics is broken!
+/*object BIG_INT extends Dynamic[M.BigInteger](RawType.intern("Ljava/math/BigInteger;"))
 
 object BIG_DEC extends Dynamic[M.BigDecimal](RawType.intern("Ljava/math/BigDecimal;"))
 
-object LOCALE extends Dynamic[java.util.Locale](RawType.intern("Ljava/util/Locale;"))
+object LOCALE extends Dynamic[java.util.Locale](RawType.intern("Ljava/util/Locale;"))*/

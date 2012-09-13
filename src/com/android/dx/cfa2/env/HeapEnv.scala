@@ -15,7 +15,7 @@ import scala.collection._
  */
 final class HeapEnv
 (final val self: HeapEnv.M = HeapEnv.defaultM,
- private final val updateHook: (Var.RawHeap_, Val_)=>Unit = null)
+ private[this] final val updateHook: (Var.RawHeap_, Val_)=>Unit = null)
 extends Env[Var.RawHeap_] with immutable.MapProxy[Var.RawHeap_, Val_] with HeapEnv.ProxyFactoried {
   // TODO: Updater... How should this actually work? Should we merge vals?
   // Current thinking is shouldn't merge because we're tracking the reference itself
