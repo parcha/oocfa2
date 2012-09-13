@@ -13,9 +13,8 @@ import collection.{parallel => par}
 package object env {
   
   trait Env[VarT <: Var_] extends Map[VarT, Val_]
-  with PrettyMap[VarT, Val_] with Dumpable with NotNull with Serializable {
-    override protected def keyStr(k:VarT) = "[" + k.toString + "]"
-    
+  // TODO: PrettyMap takes up too much space at the moment
+  /*with PrettyMap[VarT, Val_]*/ with Dumpable with NotNull with Serializable {
     // FIXME: This may be wrong... or at least not precise enough. Also consider heap vs. static-env
     def induceUnknowns[E <: Map[VarT, Val_]](prev: E)(implicit cdeps: Val_) : Map[VarT, Val_] = {
       if(prev.isEmpty) return this
@@ -49,6 +48,7 @@ package object env {
   abstract class EnvFactory[VarT <: Var_, E <: Env[VarT] with immutable.MapProxy[VarT,Val_]]
   (proxyCtor: immutable.Map[VarT,Val_] => E)
   extends MapProxyFactory[VarT, Val_, immutable.Map[VarT,Val_], E](immutable.Map(), proxyCtor) {
+    final val defaultM: M = immutable.Map()
     def union(a: E, b: E) : E = {
       val build = Builder()
       // Add the unique elements

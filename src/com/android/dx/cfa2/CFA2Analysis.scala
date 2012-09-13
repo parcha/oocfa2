@@ -105,7 +105,7 @@ object CFA2Analysis {
   type BBTracer = Tracer[BB]
   final case class BBEffect(static_env_out: StaticEnv,
                             tracef_out: TraceFrame,
-                            heap_out: HeapEnv.M,
+                            heap_out: HeapEnv,
                             uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
   type BBEffects = MutableConcurrentMap[BB, MutableConcurrentMap[BBTracer, BBEffect]]
   
@@ -182,6 +182,8 @@ object CFA2Analysis {
     }
   }
   
+  final class UnimplementedOperationException(msg: String) extends Exception(msg)
+  
   lazy val singleton = {assert(_singleton != null); _singleton}
   private var _singleton : CFA2Analysis[Opts] = null
   
@@ -231,7 +233,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       }
     }
     for(c <- contexts)
-      for(raw <- c.dataMap.keySet.iterator) {
+      // Sort to give some determinism
+      for(raw <- c.dataMap.keySet.iterator.toSeq.sortBy(_.getName.getString)) {
         val m = Method.wrap(raw, c.dataMap.get(raw).ropMeth)
         require(!(build contains m))
         build += ((m, c))
@@ -411,7 +414,17 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     var continue = true
     do {
       eval_worklist find {!_._2} match {
-        case Some((m, _)) => eval(m, new SFEnv, new HeapEnv); eval_worklist(m) = true
+        case Some((m, _)) =>
+          try { eval(m, new SFEnv, new HeapEnv) }
+          catch {
+            case e:UnimplementedOperationException =>
+              log('error) ("Unimplemented operation: "+e)
+            case e:StackOverflowError  =>
+              log('error) ("Stack overflow when attempting to evaluate "+m+"\n"+
+                           "Consider increasing the JVM's stack size with -Xss#")
+              if(!opts.continueOnOverflow) throw e
+          }
+          eval_worklist(m) = true
         case None         => continue = false
       } 
     } while(continue)
@@ -511,7 +524,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     def bbaffect(bb: BB, trace: BBTracer,
                  static_env_out: StaticEnv,
                  tracef_out: TraceFrame,
-                 heap_out: HeapEnv.M,
+                 heap_out: HeapEnv,
                  uncaught_out: immutable.Set[Exceptional]) {
       if(!bbeffects.contains(bb))
         bbeffects += ((bb, new MutableConcurrentMap))
@@ -525,7 +538,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   def trace_bb(bb: BB,
                _bbtracer : BBTracer, _uncaught : immutable.Set[Exceptional],
                _eval_state: BBEvalState,
-               _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv.M)
+               _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv)
               (implicit cdeps: Val_): Unit = {
     log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
     
@@ -543,7 +556,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     def updateHeap(k:Var.RawHeap_, v:Val_): Unit = {
       heap = new HeapEnv(heap +# (k, v), updateHeap)
     }
-    heap = new HeapEnv(_heap, updateHeap)
+    // TODO: Ensure that we can never have the self of an env be its own type (recursive)
+    heap = new HeapEnv(_heap.self, updateHeap)
     log('debug) ("Heap: "+heap)
     
     var eval_state = _eval_state
@@ -744,7 +758,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                            code+"\n"+
                            cst+"\n"+
                            srcs)
-              throw new RuntimeException("FILLED_NEW_ARRAY not implemented yet!")
+              throw new UnimplementedOperationException("FILLED_NEW_ARRAY")
               Val.Unknown(resultT)
             }
           }
@@ -786,7 +800,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                        cst+"\n"+
                        srcs+"\n"+
                        operands)
-          throw new RuntimeException("FILL_ARRAY_DATA not implemented yet!")
+          throw new UnimplementedOperationException("FILL_ARRAY_DATA")
         
         /** Calls **/
         case code:Call =>
@@ -1162,7 +1176,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               //End IF
             
             case SWITCH => //TODO
-              log('info) ("SWITCH\n"+
+              log('debug) ("SWITCH\n"+
                            br+"\n"+
                            srcs+"\n"+
                            operands)

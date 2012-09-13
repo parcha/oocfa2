@@ -37,9 +37,7 @@ extends FEnv[SFieldSpec, Var.StaticF_] with immutable.MapProxy[Var.StaticF_, Val
 with SFEnv.ProxyFactoried {
   def union(that: SFEnv) = SFEnv.union(this, that)
 }
-object SFEnv extends EnvFactory[Var.StaticF_, SFEnv](new SFEnv(_)) {
-  val defaultM = immutable.HashMap.empty[Var.StaticF_, Val_]
-}
+object SFEnv extends EnvFactory[Var.StaticF_, SFEnv](new SFEnv(_))
 
 /** The environment of a set of instance fields */
 final class IFEnv
@@ -48,6 +46,4 @@ extends FEnv[IFieldSpec, Var.InstanceF_] with immutable.MapProxy[Var.InstanceF_,
 with IFEnv.ProxyFactoried {
   def union(that: IFEnv) = IFEnv.union(this, that)
 }
-object IFEnv extends EnvFactory[Var.InstanceF_, IFEnv](new IFEnv(_)) {
-  val defaultM = immutable.HashMap.empty[Var.InstanceF_, Val_]
-}
+object IFEnv extends EnvFactory[Var.InstanceF_, IFEnv](new IFEnv(_))

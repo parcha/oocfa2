@@ -3,7 +3,7 @@ package com.android.dx.cfa2
 import scala.collection._
 
 abstract class MapFactory[_K, _V, _M <: MapFactory.Mapped[_K, _V, _M]]
-(private val empty: _M) { factory_ =>
+(private[this] val empty: _M) { factory_ =>
   final type K = _K
   final type V = _V
   final type M = _M
@@ -29,19 +29,19 @@ object MapFactory {
 }
 
 abstract class MapProxyFactory[K, V, M <: MapProxyFactory.Mapped[K,V,M], _Proxy <: MapProxyLike[K,V,M]]
-(empty: M, private val proxyCtor: M => _Proxy)
+(empty: M, private[this] val proxyCtor: M => _Proxy)
 extends MapFactory[K, V, M](empty) { factory_ =>
   final type Proxy = _Proxy
   final type ProxyLike = MapProxyLike[K,V,M]
   
-  final implicit def wrap(m: M): Proxy =  proxyCtor(m)
-  final implicit def unwrap(prox: Proxy): M = prox.self
-  
-  trait ProxyFactoried extends Proxy.Typed[M] { _:Proxy =>
+  /** CAUTION: Inherit this BEFORE all other traits, otherwise you get recursion **/
+  trait ProxyFactoried { _:Proxy =>
     final val ++# = factory_.++#(self) _
     final val +# = factory_.+#(self) _
     final val factory = factory_
   }
+  
+  final implicit def wrap(m: M): Proxy =  proxyCtor(m)
 }
 object MapProxyFactory {
   type Mapped[K,V, M <: Mapped[K,V,M]] = Map[K,V] with MapLike[K,V,M]

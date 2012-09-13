@@ -65,7 +65,7 @@ extends mutable.HashSet[FieldSlot] with LinkSet[FieldSlot, FieldSlotSet] with mu
 
 final class FieldMap
 (final val self : FieldMap.M = new immutable.HashMap[FieldSlot, Val_])
-extends immutable.MapProxy[FieldSlot, Val_] with FieldMap.ProxyFactoried {
+extends immutable.MapProxy[FieldSlot, Val_] with FieldMap.Factoried {
   def contains(spec:FieldSpec) = this exists {_._1.spec == spec }
   
 }

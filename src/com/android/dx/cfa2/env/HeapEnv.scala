@@ -16,12 +16,12 @@ import scala.collection._
 final class HeapEnv
 (final val self: HeapEnv.M = HeapEnv.defaultM,
  private[this] final val updateHook: (Var.RawHeap_, Val_)=>Unit = null)
-extends Env[Var.RawHeap_] with immutable.MapProxy[Var.RawHeap_, Val_] with HeapEnv.ProxyFactoried {
+extends immutable.MapProxy[Var.RawHeap_, Val_] 
+with Env[Var.RawHeap_] with HeapEnv.ProxyFactoried {
+  assert(!self.isInstanceOf[HeapEnv])
   // TODO: Updater... How should this actually work? Should we merge vals?
   // Current thinking is shouldn't merge because we're tracking the reference itself
   def update(`var`:Var.RawHeap_, `val`:Val_) =
     if(updateHook != null) updateHook(`var`, `val`)
 }
-object HeapEnv extends EnvFactory[Var.RawHeap_, HeapEnv](new HeapEnv(_, null)) {
-  val defaultM = immutable.HashMap.empty[Var.RawHeap_, Val_]
-}
+object HeapEnv extends EnvFactory[Var.RawHeap_, HeapEnv](new HeapEnv(_, null))

@@ -189,9 +189,11 @@ package object cfa2 {
   
   /* ============= String repr stuff ========= */
   
-  /* ============== Linearization ============ */
+  type Row[E] = GenIterable[E]
+  type Col[E] = GenSeq[E]
+  type Matrix[E] = Row[Col[E]]
   
-  def linearize(row:GenIterable[String], twixt:String="") : String = {
+  def linearize(row:Row[String], twixt:String="") : String = {
     val str = new StringBuilder
     for(col <- row) {
       str append col
@@ -201,27 +203,16 @@ package object cfa2 {
     return str result
   }
   
-  def linearizeMat(matrix:GenIterable[GenIterable[String]], twixtCols:String="", twixtRows:String="") : String = {
+  def linearizeMat(matrix:Matrix[String], twixtCols:String="", twixtRows:String="") : String = {
     val columnized =
     for(row <- matrix) yield
       linearize(row, twixtRows)
     return linearize(columnized, twixtCols)
   }
   
-  trait HasLinearizedRepr {
-    protected implicit def linearizedRepr : GenIterable[String]
-    protected val twixtLines : String = "\n"
-    override def toString : String = linearize(linearizedRepr, twixtLines)
-  }
-  
-  /* ============== Columnization =============== */
-  
-  private type Row[E] = GenIterable[E]
-  private type Col[E] = GenSeq[E]
-  type Matrix[E] = Row[Col[E]]
-  
   def normalize(matrix : Matrix[String], spacing:Int=0) : Matrix[String] = {
     val rows = matrix.size
+    require(rows > 0)
     val cols = matrix.head.length
     
     val maxes =
@@ -238,12 +229,6 @@ package object cfa2 {
       }
   }
   
-  trait HasColumnizedRepr {
-    protected implicit def columnizedRepr : Matrix[String]
-    protected val colSpacing : Int = 2 
-    protected val twixtRows : String = "\n"
-    override def toString : String = linearizeMat(normalize(columnizedRepr, colSpacing), twixtRows=twixtRows)
-  }
   
   /* ============= Logging =============== */
   trait Dumpable {
@@ -251,13 +236,4 @@ package object cfa2 {
     def dump(ps: PrintStream) = ps println this.toString
   }
   
-  /* ============== Misc =================== */
-  
-  trait PrettyMap[K,V] extends GenMap[K, V] with HasColumnizedRepr {
-    protected final def columnizedRepr : Matrix[String] =
-      for((k,v) <- this) yield linearRepr(k,v)
-    protected def linearRepr(k:K, v:V) = immutable.IndexedSeq(keyStr(k), valueStr(v))
-    protected def keyStr(k:K) : String = k.toString
-    protected def valueStr(v:V) : String = v.toString
-  }
 }
