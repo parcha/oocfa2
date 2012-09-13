@@ -43,8 +43,8 @@ package object `val` {
   
   // TODO: Hack for the non-existence of isNull for Unknown
   final def isPossiblyNull(v: VAL[RefType]) = v match {
-    case _:UNKNOWN[RefType] => Tri.U
-    case v:KNOWN[RefType]   => v.isNull 
+    case v if v.isUnknown => Tri.U
+    case v:KNOWN[RefType] => v.isNull 
   }
   
   /*type VOID = VOID.type

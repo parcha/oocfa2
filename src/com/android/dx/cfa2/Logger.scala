@@ -5,6 +5,7 @@ import java.io._
 abstract class Logger extends scala.util.logging.Logged {
   def log(s:String) : Unit
   final def apply(s: String) = log(s)
+  def finish(): Unit
 }
 object Logger {
   type Log = Any
@@ -18,6 +19,7 @@ object Logger {
 
 class PrintLogger(ps:PrintStream) extends Logger {
   override def log(s:String) = ps println s
+  def finish() = ps.flush()
 }
 class FileLogger(f:File) extends Logger {
   def this(name:String) = this(new File(name))
@@ -28,6 +30,7 @@ class FileLogger(f:File) extends Logger {
       case e:IOException => e printStackTrace
       case e:Exception => throw e
     }
+  def finish() = ps.close()
 }
 class CompressedFileLogger(f:File) extends FileLogger(f) {
   def this(name:String) = this(new File(name+".gz"))
@@ -37,13 +40,16 @@ class CompressedFileLogger(f:File) extends FileLogger(f) {
 }
 class NullaryLogger extends Logger {
   override def log(s:String) = {}
+  def finish() = Unit
 }
 class ConditionalLogger(cond: =>Boolean, l: Logger) extends Logger {
   override def log(s: String) = if(cond) l log s
+  def finish() = l.finish()
 }
 class DualLogger(l1: Logger, l2: Logger) extends Logger {
   override def log(s: String) = {
     l1 log s
     l2 log s
   }
+  def finish() = {l1.finish(); l2.finish()}
 }

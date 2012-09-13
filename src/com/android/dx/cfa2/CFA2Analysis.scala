@@ -50,11 +50,12 @@ object CFA2Analysis {
       ('debug, new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))),
       mkLog('error, new PrintLogger(System.err)))
     lazy val log = new Opts.Loggers(logs)
+    def loggers = log.logs.values
     
     val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
   }
   object Opts {
-    final class Loggers(logs: Map[Symbol, Logger]) {
+    final class Loggers(val logs: Map[Symbol, Logger]) {
       def apply(l: Symbol) = logs(l)
     }
   }
@@ -221,6 +222,11 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   require(contexts forall {!_.dataMap.isEmpty})
   require(_singleton == null)
   _singleton = this
+  
+  // HACK: close all the logs
+  Runtime.getRuntime().addShutdownHook(new Thread {
+    override def run() = opts.loggers map {_.finish()}
+  })
   
   import opts.log
   
@@ -391,7 +397,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   protected[this] val eval_worklist: EvalWorklist = {
     // Use an ordered map so as to give a semblance of determinism
     val build = new mutable.LinkedHashMap[Method, Boolean]()
-    for(m <- methodMap.seq.keys.toSeq.sortBy(_.name)
+    for(m <- methodMap.seq.keys.toSeq.sortBy(_.id.raw)
         if opts.starting_points exists {(ider:MethodIDer) => +(ider identifies m)})
       build += ((m, false))
     build
@@ -825,9 +831,14 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           
           @inline
-          def eval_summary(fsumm:FSummary) =
-            eval_summary_(fsumm.uncaught_throws.values.reduce[Set[Exceptional]] (_ union _),
-                          fsumm.rets.values)
+          def eval_summary(fsumm:FSummary) = {
+            val throws: Set[Exceptional] = fsumm.uncaught_throws.values.size match {
+              case 0 => immutable.Set()
+              case 1 => fsumm.uncaught_throws.values.head
+              case _ => fsumm.uncaught_throws.values.reduce[Set[Exceptional]] (_ union _) 
+            }
+            eval_summary_(throws, fsumm.rets.values)
+          }
           @inline
           def eval_summary_(uncaught_throws: Set[Exceptional],
                             rets: Iterable[RetVal]) {

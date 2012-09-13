@@ -22,21 +22,22 @@ object MethodIDer {
   
   final case class ByName(id: ID) extends Unique {
     def this(s:String) = this(IDParsers.parse(IDParsers.id, s).get)
-    def identifies(m: MethodDesc) = m.name == id.raw
+    def identifies(m: MethodDesc) = m.id == id
   }
   object ByName { def apply(s:String) = new ByName(s) }
   
   final case class BySignature(sig:MethodSig) extends Unique {
     def this(s:String) = this(IDParsers.parse(IDParsers.method_sig, s).get)
-    def identifies(m: MethodDesc) =
-      m.name == sig.id.raw &&
+    def identifies(m: MethodDesc) = {
+      m.id == sig.id &&
       m.arity == sig.argTs.length &&
       (m.argTs sameElements sig.argTs)
+    }
   }
   object BySignature { def apply(s:String) = new BySignature(s) }
   
   final case class ByPrototype(id: ID, proto: Prototype) extends Unique {
-    def identifies(m: MethodDesc) = m.name == id.raw &&
+    def identifies(m: MethodDesc) = m.id == id &&
                                     m.prototype == proto
   }
   
