@@ -1,5 +1,7 @@
 package com.android.dx.cfa2.`val`
 
+import language.dynamics
+
 import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
@@ -8,8 +10,9 @@ import env._
 
 import java.lang.reflect
 import scala.collection.{parallel=>par, _}
+import scala.reflect.ClassTag
 
-abstract class Dynamic[ET](raw: RawType)(final implicit val EigenType_ : ClassManifest[ET])
+abstract class Dynamic[ET](raw: RawType)(final implicit val EigenType_ : ClassTag[ET])
 extends OBJECT(raw) with Reflected[ET] {
   protected[this] final val constructor = new Instance(_, _)
   
@@ -49,13 +52,13 @@ extends OBJECT(raw) with Reflected[ET] {
       
       type Args = Seq[VAL[Reflected[_]]]
       def f(_args: Args) : VAL[retT.type] = {
-        if(_args exists (_.isUnknown)) return retT unknown Val((_args :+ inst):_*)
-        type Reflected_ = Reflected[_]
-        val args = _args.asInstanceOf[Seq[Reflected_ #Instance]]
+        if(_args exists (_.isUnknown))
+          return retT unknown Val((_args :+ inst):_*)
+        val args = _args.asInstanceOf[Seq[INST[Reflected_]]]
         
         val args_ = for(v <- args) yield v.asInstanceOf[v.typ.Instance].self.asInstanceOf[Object]
         val hash = self.hashCode
-        val ret = m.invoke(self, args_ :_*).asInstanceOf[retT.EigenType]
+        val ret: retT.EigenType = m.invoke(self, args_ :_*).asInstanceOf[retT.EigenType]
         // Assert that we didn't mutate the lifted reference
         assert(self.hashCode == hash)
         val deps = Val((args :+ inst):_*)

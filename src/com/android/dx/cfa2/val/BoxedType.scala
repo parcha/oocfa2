@@ -5,6 +5,7 @@ import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
 import env._
+import scala.reflect.ClassTag
 
 sealed trait BoxedType[ContainedType <: PrimitiveType] extends OBJECT {
   final type Contents = ContainedType
@@ -26,7 +27,7 @@ object BoxedType {
   }
   
   sealed abstract class BoxedValuedType[V <: AnyRef, T <: ValuedType[_]] protected
-  (raw:RawType, val containedType: T)(implicit V_ : ClassManifest[V])
+  (raw:RawType, val containedType: T)(implicit V_ : ClassTag[V])
   // FIXME: Dynamics are actually broken for all object types but strings
   extends Dynamic[V](raw)(V_) with BoxedType[T]
   

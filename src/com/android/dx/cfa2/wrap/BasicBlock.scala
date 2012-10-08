@@ -63,12 +63,7 @@ final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends 
   override def equals(that: Any) = raw.equals(that)
   override val hashCode = raw.hashCode
 }
-object BasicBlock {
-  //TODO: does this need to be threadsafe?
-  private val cache = {
-    type C = Cached[RawBB, BasicBlock, MutableConcurrentMap]
-    new C#Map with C#Cacher
-  }
+object BasicBlock extends Cacher[RawBB, BasicBlock]{
   private def intern(raw:RawBB, parent: Method) = cache.cache(raw, new BasicBlock(raw, parent))
   
   def wrap(raw: RawBB, parent: Method) = cache cachedOrElse (raw, intern(raw, parent))

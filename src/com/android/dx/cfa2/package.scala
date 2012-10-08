@@ -8,8 +8,9 @@ package object cfa2 {
 
   /* ============= Convenience ============ */
   import dx.rop.cst._
-  import `val`._
-  def liftConstant(cst:TypedConstant) = cst match {
+  def liftConstant(cst:TypedConstant) = {
+    import `val`._
+    cst match {
     case c:CstInteger   => Val.Atom(INT.instance(c.getValue))
     case c:CstLong      => Val.Atom(LONG.instance(c.getValue))
     case c:CstFloat     => Val.Atom(FLOAT.instance(c.getValue))
@@ -17,6 +18,7 @@ package object cfa2 {
     case c:CstString    => Val.Atom(STRING.instance(c.getString))
     case c:CstType      => Val.Atom(CLASS.instance(Val.Bottom, ('desc, c.getDescriptor.getString)))
     case c:CstKnownNull => Val.Atom(NULL.singleton)
+  }
   }
   
   /* ======================== Parsing ================ */
@@ -59,15 +61,14 @@ package object cfa2 {
       throw new PresumptionException(msg)
   }
   
-  def presumably[E <: Exception](act: Unit=>Unit)
-                (implicit E_ : Manifest[E]) = presumably[E, Unit](act)
-  def presumably[E <: Exception, R](act: Unit=>R)
-                (implicit E_ : Manifest[E]): R = {
+  import scala.reflect.{ClassTag, classTag}
+  def presumably[E <: Exception : ClassTag](act: Unit=>Unit) = presumably[E, Unit](act)
+  def presumably[E <: Exception : ClassTag, R](act: Unit=>R): R = {
     try {
       act()
     } catch {
       case e:E =>
-        if(E_ >:> ClassManifest.fromClass(e.getClass))
+        if(classTag[E] >:> ClassTag(e.getClass))
           throw new PresumptionException("presumption failed", e)
         else throw e
     }
@@ -157,7 +158,7 @@ package object cfa2 {
                                                                 (analysisClasspath map (_.toURL)))
   
   /* ============ Hooks ================== */
-  import `val`.IParams
+  import `val`._
   type Hook[-Args, +Ret] = Args => Option[Ret]  
   type InstanceHook = Hook[(Instantiable, Val_, IParams),
                            IParams]
@@ -174,18 +175,6 @@ package object cfa2 {
       case None      =>
       case Some(ret) => act(ret)
     }
-  
-  /* ============= Util type stuff =========== */
-  import scala.ref.SoftReference
-  type Cached[K, V<:AnyRef, M[K, V] <: mutable.Map[K, V]] = {
-    type Map = M[K,SoftReference[V]]
-    type Cacher = Cache[K,V]
-  }
-  import scala.ref.WeakReference
-  type Registered[K, V<:AnyRef, M[K, V] <: mutable.Map[K, V]] = {
-    type Map = M[K,WeakReference[V]]
-    type Registrar = Registry[K,V]
-  }
   
   /* ============= String repr stuff ========= */
   

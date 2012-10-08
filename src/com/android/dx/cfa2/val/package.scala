@@ -31,6 +31,9 @@ package object `val` {
   
   type SUBT[T <: Type] = Sub forSome {type Sub <: T}
   
+  type Reflected_ = Reflected[_]
+  type Dynamic_ = Dynamic[_]
+  
   /*
    *  At the moment, we just alias this to any instantiable type because we
    *  can't just limit it to derivations of THROWABLE since when we lift a type

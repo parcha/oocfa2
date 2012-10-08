@@ -8,6 +8,7 @@ import CFA2Analysis.singleton.opts.log
 import env._
 import Tri._
 import parsers._
+import scala.reflect.{ClassTag, classTag}
 
 /**
  * Also counts as the top type.
@@ -24,8 +25,8 @@ abstract case class Type private[`val`] (val raw:RawType) extends Immutable with
   import Type._
   //if(!(this eq Type.BOTTOM)) {
     require(raw != null)
-    require(!typeRegistry.isRegistered(raw))
-	typeRegistry.register(raw, this)
+    require(!isRegistered(raw))
+	register(raw, this)
   //}
   
   def descriptor = raw.getDescriptor
@@ -63,7 +64,11 @@ abstract case class Type private[`val`] (val raw:RawType) extends Immutable with
     else
       Tri.F*/
 }
-object Type {
+object Type extends Registrar[RawType, Type] {
+  import registry._
+  private def register(raw: RawType, typ: Type) = registry.register(raw, typ)
+  private def isRegistered(raw: RawType) = registry.isRegistered(raw)
+  
   /*case object BOTTOM extends Instantiable(null) {
     override def equals(other: Any) = false
   }*/
@@ -101,19 +106,14 @@ object Type {
       yield apply(raws.get(i))
   }
   def apply(klass: Class[_]): Type = intern(RawType.internClassName(klass.getName))
-  def apply[C](implicit C_ : Manifest[C]): Type = apply(C_.erasure)
+  def apply[C: ClassTag]: Type = apply(classTag[C].runtimeClass)
   /** May throw IllegalArgumentException if the class name given isn't valid **/
   def apply(type_id: TypeIDExpr): Type = intern(RawType.intern(type_id.descriptor))
   
   implicit def wrap(raw: RawType) = intern(raw)
   implicit def unwrap(t: Type) = t.raw
   
-  import Registry._
-  private val typeRegistry = {
-    type R = Registered[RawType, Type, MutableConcurrentMap]
-    new R#Map with R#Registrar
-  }
-  private def intern(raw:RawType) : Type = typeRegistry registered raw match {
+  private def intern(raw:RawType) : Type = registry registered raw match {
     case Is(t) => t
     case Was   =>
       log('warn) ("Previously registered type for "+ raw +" now unreferenced")

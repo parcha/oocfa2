@@ -7,7 +7,6 @@ import tlc._
 //import tlc.Algebra._
 import tlc.Func._
 
-import scala.reflect.Manifest
 import scala.annotation.unchecked._
 import scala.collection.{Set => CSet, Seq => CSeq, _}
 import immutable._
@@ -109,13 +108,6 @@ object Val {
     case UnionSet(vs @ _*) => Seq(vs:_*)
   }
   
-  /*def union[T1 <: Instantiable, T2 <: Instantiable,
-            Join : Join2[T1, T2, Instantiable]# ^]
-           (v1: Val[T1], v2:Val[T2]) : Val[Join] = {
-    val seq = (unapplySeq(v1) :+ unapplySeq(v2)).asInstanceOf[Seq[VAL[Join]]]
-    apply(seq:_*)
-  }*/
-  
   def union[T1 <: Join, T2 <: Join, Join <: Instantiable]
            (v1: Val[T1], v2:Val[T2]) : Val[Join] = {
     if(v1 == Val.Top || v2 == Val.Top)
@@ -200,7 +192,7 @@ object Val {
   extends Val[Join]*/
   
   final class UnionSet[Join <: Instantiable] private[Val]
-                      (vs: GenSet[SUBV[SUBT[Join]]]) //(implicit Join_ : Manifest[Join])
+                      (vs: GenSet[SUBV[SUBT[Join]]])
   extends Val[Join] {
     override lazy val asSet = vs
   }

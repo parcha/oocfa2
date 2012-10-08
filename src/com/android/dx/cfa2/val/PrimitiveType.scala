@@ -3,6 +3,7 @@ package com.android.dx.cfa2.`val`
 import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
+import scala.reflect.{ClassTag, classTag}
 
 sealed trait PrimitiveType extends Instantiable {
   require(raw isPrimitive)
@@ -16,7 +17,7 @@ object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton
   type Instance = Instance_
 }
 
-sealed abstract class ValuedType[V <: AnyVal] protected[`val`] (raw:RawType)(implicit val EigenType_ : ClassManifest[V])
+sealed abstract class ValuedType[V <: AnyVal] protected[`val`] (raw:RawType)(implicit val EigenType_ : ClassTag[V])
 extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBeParam {
   final override def instance(deps: Val_ =Val.Bottom, params: IParams=paramify()) = {
     require(params contains 'self, params.size==1)

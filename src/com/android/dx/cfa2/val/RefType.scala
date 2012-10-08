@@ -97,7 +97,7 @@ object RefType {
  *  * What should singleton be?
  *  * Should this extend OBJECT? If so, how are e.g. fields dealt with?
  */
-case object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
+object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
   /*  NULL subtypes all RefTypes
    *  Additionally, we don't have an unknown case here because
    *  the only unknown types we could encounter would have to be

@@ -15,3 +15,7 @@ trait Cache[K, V <: AnyRef] extends mutable.Map[K, SoftReference[V]] {
   }
   def isCached(k:K) = cached(k) != None
 }
+trait Cacher[K, V<:AnyRef] {
+  protected[this] type CacheMap = MutableConcurrentMap[K,SoftReference[V]]
+  protected[this] object cache extends CacheMap with Cache[K,V]
+}

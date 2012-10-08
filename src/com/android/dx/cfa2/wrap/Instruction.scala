@@ -8,7 +8,7 @@ import cfa2.`val`._
 import scala.collection._
 
 sealed case class Instruction(val raw:RawInsn) extends Immutable with NotNull {
-  val operation:ROperator = raw.getOpcode
+  def operation:ROperator = ROperator(raw.getOpcode)
   def opcode = operation.opcode
   def sources = raw.getSources
   def sourceTs = operation.sourceTypes
@@ -19,12 +19,7 @@ sealed case class Instruction(val raw:RawInsn) extends Immutable with NotNull {
   def position = raw.getPosition
   override lazy val toString = raw.toHuman
 }
-object Instruction {
-  // TODO: does this need to be threadsafe? Do we even need it?
-  private val cache = {
-    type C = Cached[RawInsn, Instruction, MutableConcurrentMap]
-    new C#Map with C#Cacher
-  }
+object Instruction extends Cacher[RawInsn, Instruction] {
   private def intern(raw:RawInsn) = {
     val i = raw match {
       case raw:CstInsn => new Constant(raw)

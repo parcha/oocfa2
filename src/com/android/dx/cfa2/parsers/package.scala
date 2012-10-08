@@ -51,8 +51,8 @@ package object parsers {
       }
     }
     
-    protected final def ignorable_[T](p: =>Parser[List[T]], handle: String=>Unit=null): Parser[List[T]] =
-      ignorable(p, handle) ^^ {_.flatten.toList}
+    /*protected final def ignorable_[T](p: =>Parser[List[T]], handle: String=>Unit=null): Parser[List[T]] =
+      ignorable(p, handle) ^^ {_.flatten.toList}*/
     
     import java.io._
     def PackratReader(f: File) =
