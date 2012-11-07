@@ -6,6 +6,7 @@ import cfa2.`val`.Type
 final case class ID private[parsers] (raw: String) extends NotNull {
   //private[parsers] def this(parts: List[ID]) = this(parts map {_.id} mkString ".")
   def compose(that: ID) = ID(this.raw+"."+that.raw)
+  lazy val unqualified = raw.split('.').last
 }
 sealed abstract class TypeIDExpr extends scala.util.parsing.input.Positional {
   def descriptor: String

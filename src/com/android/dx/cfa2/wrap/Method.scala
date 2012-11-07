@@ -3,20 +3,21 @@ package com.android.dx.cfa2.wrap
 import com.android.dx
 import dx.cf.iface.{Method => Raw}
 import dx.rop.code.RopMethod
-
 import dx.cfa2
 import cfa2._
 import `val`._
 import prop.Properties._
 import parsers._
-
 import scala.collection._
 
 sealed trait MethodDesc extends Immutable with NotNull {
   final def name = nat.getName.getString
   final lazy val id = {
     val pname = parent.getClassType.toHuman
-    IDParsers.parse(IDParsers.meth_id, pname+"."+name).get
+    IDParsers.parse(IDParsers.meth_id, pname+"."+name) match {
+      case IDParsers.Success(id, _) => id
+      case _ => throw new RuntimeException("Failure in parsing the method descriptor for "+pname+"."+name)
+    }
   }
   def prototype: dx.rop.`type`.Prototype
   final lazy val arity = argTs.size
@@ -30,7 +31,7 @@ sealed trait MethodDesc extends Immutable with NotNull {
   final lazy val isInstanceInit = nat.isInstanceInit
   final lazy val isClassInit = nat.isClassInit
   
-  def isIMethod: Tri
+  val isIMethod: Tri
   
   override lazy val toString = id+"/"+arity
 }

@@ -15,8 +15,7 @@ class IDParsers extends RichParsers {
             "[\\w\\$]*" //end with as many id-chars as we like
             ).r ^^ ID
   
-  // TODO: For the moment, we disallow qual-ids that are only one component long
-  val qual_id = rep2sep(id, ".") ^^ {_ reduceLeft {_ compose _}}
+  val qual_id = repsep(id, ".") ^^ {_ reduceLeft {_ compose _}}
   
   val meth_id = qual_id ||| (((qual_id <~ ".") ~! ("<clinit>" | "<init>")) ^^ {
     case id ~ name => ID(id.raw + "." + name)
