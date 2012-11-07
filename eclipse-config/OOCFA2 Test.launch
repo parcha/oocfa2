@@ -2,10 +2,10 @@
 <launchConfiguration type="scala.application">
 <stringAttribute key="bad_container_name" value="/oocfa2/eclipse-config/oocfa2-tes"/>
 <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
-<listEntry value="/oocfa2/src/com/android/dx/cfa2/test/CFA2Test.scala"/>
+<listEntry value="/oocfa2"/>
 </listAttribute>
 <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">
-<listEntry value="1"/>
+<listEntry value="4"/>
 </listAttribute>
 <stringAttribute key="org.eclipse.debug.ui.ATTR_CAPTURE_IN_FILE" value="${workspace_loc:/oocfa2}/test.log"/>
 <listAttribute key="org.eclipse.debug.ui.favoriteGroups">
