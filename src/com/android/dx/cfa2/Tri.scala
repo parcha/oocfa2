@@ -10,11 +10,11 @@ sealed abstract class Tri extends Immutable with NotNull with Serializable {
   def &(o: =>Tri) : Tri
   def |(o: =>Tri) : Tri
   final def ^(o:Tri) = (this & !o) | (!this & o) 
-  def unary_! : Tri
+  val unary_! : Tri
   /** T | U **/
-  def unary_+ : Boolean
+  val unary_+ : Boolean
   /** F | U **/
-  def unary_- : Boolean
+  val unary_- : Boolean
 }
 object Tri {
   case object T extends Tri {
