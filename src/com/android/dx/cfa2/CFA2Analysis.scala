@@ -23,6 +23,7 @@ import collection.{parallel => par}
 import collection.JavaConversions._
 import annotation._
 import util.control.TailCalls.{Call=>TCall, _}
+import util.control.Breaks._
 import actors.Actor.actor
 import scala.actors.Futures._
 import scala.annotation.unchecked.uncheckedStable
@@ -376,6 +377,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   
   /* ====== Algorithm ===== */
   protected[this] val fsummaries = new FSummaries
+  @inline
   protected[this] final def summarize(m: Method,
                                       index: FIndex,
                                       trace: EncodedTrace,
@@ -390,6 +392,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     else
       rets(trace) = rets(trace) union ret
   }
+  @inline
   protected[this] final def summarize(m: Method,
                                       index: FIndex,
                                       trace: EncodedTrace,
@@ -413,6 +416,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   }
   
   protected[this] val feffects = new FEffects
+  @inline
   protected[this] final def faffect(m: Method, trace: FTracer,
                                     static_env_out: StaticEnv,
                                     heap_out: HeapEnv) = {
@@ -579,7 +583,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                _bbtracer : BBTracer, _uncaught : immutable.Set[Exceptional],
                _eval_state: BBEvalState,
                _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv)
-              (implicit cdeps: Val_): Unit = {
+              (implicit cdeps: Val_): /*TailRec[*/Unit/*]*/ = {
     log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
     
     val bbtracer = _bbtracer :+ bb
@@ -641,6 +645,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     var result :Val_ = Val.Bottom
     val insns = bb.getInsns
+    breakable {
     // All but the branching instruction
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
@@ -654,7 +659,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
        *   so they should all be invalidated
        */
       // No-ops
-      if(ins.opcode == NOP || ins.opcode == MARK_LOCAL) return
+      if(ins.opcode == NOP || ins.opcode == MARK_LOCAL) break
       
       val srcs = for(i <- 0 until ins.sources.size)
         yield Var.Register(ins.sources.get(i))
@@ -846,6 +851,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         case code:Call =>
           val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
           
+          @inline
           def mkparams(args: Iterable[Val_]) = {
             def deref[T <: Instantiable](vs: Val[T]): Val[T] = {
               val done: mutable.Set[Val[T]] = mutable.Set()
@@ -1027,9 +1033,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         assert(!br.opcode.isInstanceOf[End])
         handle_end()
       }
-      return trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
+      return /*tailcall(*/trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)//)
     }
-    else if(bb.successors.size == 0) { handle_end(); return }
+    else if(bb.successors.size == 0) { handle_end(); break }
     else br.opcode match {
       // TODO: No need to match on br anymore; unindent this
       // Strictly branching, with multiple possible branches
@@ -1070,7 +1076,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupDone =>
               log('debug) ("Done cleaning up loop")
-              return
+              break
           }
         }
         
@@ -1234,7 +1240,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         if(reach.isEmpty) {
           // We've reached the end of a trace of execution
           fsummarize_u(uncaught.toSeq:_*)
-          return
+          break
         }
         val branch_set =
           // FIXME: TracePhase.None shouldn't be a problem... so why do we have to check it?
@@ -1287,7 +1293,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         if(branch_set.isEmpty) {
           log('debug) ("Branching set empty, so summarizing with uncaught exceptions")
           fsummarize_u(uncaught.toSeq:_*)
-          return
         }
         else {
           log('debug) ("Will branch to: "+branch_set)
@@ -1302,11 +1307,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                                       static_env_,
                                       reach(s).tracef,
                                       heap_)(reach(s).cdeps)//)
-        
         //awaitAll(opts.timeout*1000, futures.toSeq:_*)
-        return
-    } // End branch matching
-    assert(false) // Shouldn't drop to here
+    }} // End branch matching + breakable
+    //done(Unit)
   } // End trace_bb
   
   trace_bb(meth.firstBlock,
