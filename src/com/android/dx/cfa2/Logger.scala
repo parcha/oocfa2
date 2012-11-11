@@ -2,10 +2,12 @@ package com.android.dx.cfa2
 
 import java.io._
 
-abstract class Logger extends scala.util.logging.Logged {
-  def log(s:String) : Unit
+abstract class Logger {
+  def log(s:String) : Unit = stream println s
   final def apply(s: String) = log(s)
-  def finish(): Unit
+  def finish(): Unit = stream.close()
+  // HACK: used to access underlying printstream for e.g. stack traces
+  val stream: PrintStream
 }
 object Logger {
   type Log = Any
@@ -17,39 +19,38 @@ object Logger {
   }
 }
 
-class PrintLogger(ps:PrintStream) extends Logger {
-  override def log(s:String) = ps println s
-  def finish() = ps.flush()
-}
+class PrintLogger(val stream:PrintStream) extends Logger
 class FileLogger(f:File) extends Logger {
   def this(name:String) = this(new File(name))
-  protected[this] val ps = new PrintStream(f)
+  val stream = new PrintStream(f)
   override def log(s:String) = 
-    try ps println s
+    try stream println s
     catch {
       case e:IOException => e printStackTrace
       case e:Exception => throw e
     }
-  def finish() = ps.close()
 }
 class CompressedFileLogger(f:File) extends FileLogger(f) {
   def this(name:String) = this(new File(name+".gz"))
   import java.util.zip._
-  override protected[this] val ps =
+  override val stream =
     new PrintStream(new GZIPOutputStream(new FileOutputStream(f)))
 }
 class NullaryLogger extends Logger {
   override def log(s:String) = {}
-  def finish() = Unit
+  override def finish() = Unit
+  val stream = null
 }
 class ConditionalLogger(cond: =>Boolean, l: Logger) extends Logger {
   override def log(s: String) = if(cond) l log s
-  def finish() = l.finish()
+  override def finish() = l.finish()
+  val stream = l.stream
 }
 class DualLogger(l1: Logger, l2: Logger) extends Logger {
   override def log(s: String) = {
     l1 log s
     l2 log s
   }
-  def finish() = {l1.finish(); l2.finish()}
+  val stream = l1.stream
+  override def finish() = {l1.finish(); l2.finish()}
 }

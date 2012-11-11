@@ -7,43 +7,40 @@ import scala.collection._
  */
 sealed abstract class Tri extends Immutable with NotNull with Serializable {
   import Tri._
-  final def &(o: =>Tri) = this match {
-    case T => o
-    case F => F
-    case U => o match {
-      case F => F
-      case _ => U
-    }
-  }
-  final def |(o: =>Tri) = this match {
-    case T => T
-    case F => o
-    case U => o match {
-      case T => T
-      case _ => U
-    }
-  }
+  def &(o: =>Tri) : Tri
+  def |(o: =>Tri) : Tri
   final def ^(o:Tri) = (this & !o) | (!this & o) 
-  final def unary_! : Tri = this match {
-    case T => F
-    case F => T
-    case U => U
-  }
+  val unary_! : Tri
   /** T | U **/
-  def unary_+ : Boolean
+  val unary_+ : Boolean
   /** F | U **/
-  def unary_- : Boolean
+  val unary_- : Boolean
 }
 object Tri {
   case object T extends Tri {
+    def &(o: =>Tri) = o
+    def |(o: =>Tri) = this
+    val unary_! = F
     val unary_+ = true
     val unary_- = false
   }
   case object F extends Tri {
+    def &(o: =>Tri) = this
+    def |(o: =>Tri) = o
+    val unary_! = T
     val unary_+ = false
     val unary_- = true
   } 
   case object U extends Tri {
+    def &(o: =>Tri) = o match {
+      case F => F
+      case _ => U
+    }
+    def |(o: =>Tri) = o match {
+      case T => T
+      case _ => U
+    }
+    val unary_! = U
     val unary_+ = true
     val unary_- = true
   }

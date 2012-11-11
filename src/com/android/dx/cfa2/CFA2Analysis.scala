@@ -23,13 +23,16 @@ import collection.{parallel => par}
 import collection.JavaConversions._
 import annotation._
 import util.control.TailCalls.{Call=>TCall, _}
+import util.control.Breaks._
 import actors.Actor.actor
 import scala.actors.Futures._
 import scala.annotation.unchecked.uncheckedStable
+import java.io.File
 
 object CFA2Analysis {
   
   abstract class Opts protected[CFA2Analysis] extends Immutable with NotNull {
+    import Opts._
     def single_threaded: Boolean
     def debug: Boolean
     // In seconds
@@ -39,20 +42,22 @@ object CFA2Analysis {
     def outPath: String
     def continueOnOverflow = !debug
     
+    lazy val extra_classpaths: Option[List[java.net.URL]] = None
+    lazy val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
+    
     protected def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
     protected def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
       (sym, new DualLogger(primary, mkLog(sym)._2))
       
-    protected[this] def logs = immutable.Map(
+    protected[this] def _logs = immutable.Map(
       mkLog('out, new PrintLogger(System.out)),
       mkLog('info, new PrintLogger(System.err)),
       mkLog('warn, new PrintLogger(System.err)),
       ('debug, new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))),
       mkLog('error, new PrintLogger(System.err)))
+    final lazy val logs = _logs
     lazy val log = new Opts.Loggers(logs)
     def loggers = log.logs.values
-    
-    val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
   }
   object Opts {
     final class Loggers(val logs: Map[Symbol, Logger]) {
@@ -217,6 +222,35 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   import CFA2Analysis._
   import Tracer._
   
+  // Setup global environment
+	{
+	  if(opts.extra_classpaths != None)
+	    for(url <- opts.extra_classpaths.get)
+	      BuiltinAnalysisClassLoader += url
+	  
+	  // FIXME: HACK
+	  val fileNames = dx.command.dexer.Main.args.fileNames
+	  for(f <- fileNames)
+	    BuiltinAnalysisClassLoader += new File(f).toURL
+	  
+	  // FIXME: Clever hack; actually WORKS! But redundant except for apks
+	  /*import dx.cf.direct.ClassPathOpener
+	  for(f <- fileNames)
+	    new ClassPathOpener(f, false,
+	    new ClassPathOpener.Consumer {
+	      def processFileBytes(name: String, lastModified: Long, data: Array[Byte]) =
+	        if(!(name endsWith ".class")) false
+	        else {
+	          val id = name dropRight 6
+	          log('debug) ("Attempting to dynamically register "+id)
+	          BuiltinAnalysisClassLoader.registerRawClass(id, data) != null
+	        }
+	      def onException(e: Exception) =
+	        log('warn) ("Dynamically loading class for analysis failed: "+e)
+	      def onProcessArchiveStart(f: File) = Unit
+	    }).process()*/
+	}
+  
   def this(context: Context, opts: O) = this(immutable.Set(context), opts)
   
   require(contexts forall {!_.dataMap.isEmpty})
@@ -316,9 +350,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     }
   
   @inline
-  protected[cfa2] def methodForSpec(spec: MethodSpec) = {
-    def f(pair:(Method, Context.Data)) = Some(pair._1)
-    (dataMap find { _._2.methRef.equals(spec) }).flatMap(f)
+  protected[cfa2] def methodForSpec(spec: MethodSpec): Option[Method] = {
+    def f(pair:(Method, Context.Data)): Some[Method] = Some(pair._1)
+    (dataMap find { _._2.methRef.equals(spec) }) flatMap f
   }
   @inline
   protected[cfa2] def classForMethod(m: Method) = dataMap get m match {
@@ -343,6 +377,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   
   /* ====== Algorithm ===== */
   protected[this] val fsummaries = new FSummaries
+  @inline
   protected[this] final def summarize(m: Method,
                                       index: FIndex,
                                       trace: EncodedTrace,
@@ -357,6 +392,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     else
       rets(trace) = rets(trace) union ret
   }
+  @inline
   protected[this] final def summarize(m: Method,
                                       index: FIndex,
                                       trace: EncodedTrace,
@@ -380,6 +416,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   }
   
   protected[this] val feffects = new FEffects
+  @inline
   protected[this] final def faffect(m: Method, trace: FTracer,
                                     static_env_out: StaticEnv,
                                     heap_out: HeapEnv) = {
@@ -428,6 +465,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case e:StackOverflowError  =>
               log('error) ("Stack overflow when attempting to evaluate "+m+"\n"+
                            "Consider increasing the JVM's stack size with -Xss#")
+              e.printStackTrace(opts.logs('error).stream)
               if(!opts.continueOnOverflow) throw e
           }
           eval_worklist(m) = true
@@ -545,7 +583,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                _bbtracer : BBTracer, _uncaught : immutable.Set[Exceptional],
                _eval_state: BBEvalState,
                _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv)
-              (implicit cdeps: Val_): Unit = {
+              (implicit cdeps: Val_): /*TailRec[*/Unit/*]*/ = {
     log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
     
     val bbtracer = _bbtracer :+ bb
@@ -607,6 +645,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     var result :Val_ = Val.Bottom
     val insns = bb.getInsns
+    breakable {
     // All but the branching instruction
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
@@ -620,7 +659,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
        *   so they should all be invalidated
        */
       // No-ops
-      if(ins.opcode == NOP || ins.opcode == MARK_LOCAL) return
+      if(ins.opcode == NOP || ins.opcode == MARK_LOCAL) break
       
       val srcs = for(i <- 0 until ins.sources.size)
         yield Var.Register(ins.sources.get(i))
@@ -812,6 +851,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         case code:Call =>
           val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
           
+          @inline
           def mkparams(args: Iterable[Val_]) = {
             def deref[T <: Instantiable](vs: Val[T]): Val[T] = {
               val done: mutable.Set[Val[T]] = mutable.Set()
@@ -855,8 +895,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           
           @inline
-          def call_unknown(retT: Instantiable) = {
-            log('debug) ("Call unknown...")
+          def call_unknown(m: MethodDesc, retT: Instantiable) = {
+            log('debug) ("Call unknown: "+m)
             val params = mkparams(operands).toSeq
             val hookRets = (umethod_hooks map (_(spec, params))).flatten
             val result =
@@ -867,7 +907,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           @inline
           def call_known(m: Method, retT: Instantiable) = {
-            log('debug) ("Call known...")
+            log('debug) ("Call known: "+m)
             val params = mkparams(operands).toSeq
             val next_header = (mtracer.preheader :+ m).preheader :+ m
             val next_phase = mtracePhases get next_header
@@ -877,7 +917,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 // TODO: actually refine this to use the propagated unknowns
                 // though it may be the case that we eventually reach a fixed-point
                 // of induced unknowns via summarization...
-                call_unknown(retT)
+                call_unknown(m, retT)
               case _ =>
                 try {
                   var sum = trace(m, mtracer, mtracePhases, static_env, heap, params:_*)
@@ -889,7 +929,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             	    log('error) ("Stack overflow when attempting to call "+m+" from "+meth+"\n"+
             	                 "Consider increasing the JVM's stack size with -Xss#")
             	    if(!opts.continueOnOverflow) throw e
-            	    call_unknown(retT)
+            	    else e.printStackTrace(opts.logs('warn).stream)
+            	    call_unknown(m, retT)
                 }
             }
           }
@@ -898,7 +939,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case INVOKE_STATIC =>
               val retT = Type(spec.getPrototype.getReturnType).asInstanceOf[Instantiable]
               methodForSpec(spec) match {
-                case None    => call_unknown(retT)
+                case None    => call_unknown(GhostMethod(spec), retT)
                 case Some(m) => call_known(m, retT)
               }
             // FIXME: INVOKE_SUPER needs to actually call the super-method
@@ -927,7 +968,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               else methodForSpec(spec) match {
                 // TODO: We may be able to look up the method if it's reflected
                 // FIXME: What if it returns void?
-                case None    => call_unknown(retT)
+                case None    => call_unknown(GhostMethod(spec), retT)
                 case Some(m) => call_known(m, retT)
               }
             }
@@ -992,10 +1033,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         assert(!br.opcode.isInstanceOf[End])
         handle_end()
       }
-      trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)
-      return
+      return /*tailcall(*/trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)//)
     }
-    else if(bb.successors.size == 0) { handle_end(); return }
+    else if(bb.successors.size == 0) { handle_end(); break }
     else br.opcode match {
       // TODO: No need to match on br anymore; unindent this
       // Strictly branching, with multiple possible branches
@@ -1036,7 +1076,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupDone =>
               log('debug) ("Done cleaning up loop")
-              return
+              break
           }
         }
         
@@ -1200,7 +1240,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         if(reach.isEmpty) {
           // We've reached the end of a trace of execution
           fsummarize_u(uncaught.toSeq:_*)
-          return
+          break
         }
         val branch_set =
           // FIXME: TracePhase.None shouldn't be a problem... so why do we have to check it?
@@ -1253,7 +1293,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         if(branch_set.isEmpty) {
           log('debug) ("Branching set empty, so summarizing with uncaught exceptions")
           fsummarize_u(uncaught.toSeq:_*)
-          return
         }
         else {
           log('debug) ("Will branch to: "+branch_set)
@@ -1268,11 +1307,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                                       static_env_,
                                       reach(s).tracef,
                                       heap_)(reach(s).cdeps)//)
-        
         //awaitAll(opts.timeout*1000, futures.toSeq:_*)
-        return
-    } // End branch matching
-    assert(false) // Shouldn't drop to here
+    }} // End branch matching + breakable
+    //done(Unit)
   } // End trace_bb
   
   trace_bb(meth.firstBlock,

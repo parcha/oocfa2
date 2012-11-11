@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="scala.application">
+<stringAttribute key="bad_container_name" value="/oocfa2/eclipse"/>
+<listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
+<listEntry value="/oocfa2-test/src/com/android/dx/cfa2/test/SecurityScalaExecutionHook.java"/>
+</listAttribute>
+<listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">
+<listEntry value="1"/>
+</listAttribute>
+<mapAttribute key="org.eclipse.debug.core.preferred_launchers">
+<mapEntry key="[debug]" value="scala.application"/>
+</mapAttribute>
+<stringAttribute key="org.eclipse.debug.ui.ATTR_CAPTURE_IN_FILE" value="${workspace_loc:/oocfa2-test}/security-test.log"/>
+<listAttribute key="org.eclipse.debug.ui.favoriteGroups">
+<listEntry value="org.eclipse.debug.ui.launchGroup.debug"/>
+</listAttribute>
+<booleanAttribute key="org.eclipse.jdt.debug.ui.CONSIDER_INHERITED_MAIN" value="true"/>
+<stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="com.android.dx.cfa2.test.SecurityScalaExecutionHook"/>
+<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--optimize=devtest --scope=unit --no-locals --optcfg=/tmp/oocfa2/config.json /home/alex/Projects/Research/android-dev-env/eclipse-workspace/ContactManager/bin/classes /home/alex/Projects/Research/android-dev-env/eclipse-workspace/ContactManager/bin/AndroidManifest.xml"/>
+<stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="oocfa2-test"/>
+<stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-ea -Xmx2g -Xss4m&#10;-XX:+UseThreadPriorities&#10;-XX:+UseFastAccessorMethods&#10;-XX:+UseFastEmptyMethods&#10;-XX:+UseSSE42Intrinsics&#10;-XX:+UseCompressedOops&#10;-XX:+DoEscapeAnalysis"/>
+</launchConfiguration>
