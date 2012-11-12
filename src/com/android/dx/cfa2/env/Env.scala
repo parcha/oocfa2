@@ -9,6 +9,7 @@ import `val`._
 import collection._
 import collection.{parallel => par}
 
+// TODO: Contemplate the repercussions of making Envs point to WeakRefs
 trait Env[VarT <: Var_] extends Map[VarT, Val_]
 // TODO: PrettyMap takes up too much space at the moment
 /*with PrettyMap[VarT, Val_]*/ with Dumpable with NotNull with Serializable {
