@@ -64,7 +64,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
    * reference itself is unknown.
    */
   trait Unknown extends self.Value
-  final case object Unknown extends self.Value with self.Unknown {
+  final object Unknown extends self.Value with self.Unknown {
     val isUnknown = true
     val deps = Val.Top
   }
