@@ -6,6 +6,7 @@ import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
+import wrap._
 import env._
 
 import java.lang.reflect
@@ -14,6 +15,7 @@ import scala.reflect.ClassTag
 
 abstract class Dynamic[ET](raw: RawType)(final implicit val EigenType_ : ClassTag[ET])
 extends OBJECT(raw) with Reflected[ET] {
+  import Dynamic._
   protected[this] final val constructor = new Instance(_, _)
   
   protected[this] final class Instance_(params: IParams, deps: Val_)
@@ -21,20 +23,8 @@ extends OBJECT(raw) with Reflected[ET] {
   with scala.Dynamic { inst:Instance =>
     
     protected[this] final class Ref_(env: HeapEnv) extends super.Ref_(env) { _:Ref =>
-    final def \(spec:MethodSpec)(vargs: Val[Reflected[_]]*) : Val_ = {
-      val name = spec.getNat.getName.getString
-      val proto = spec.getPrototype // WITHOUT the implicit this param
-      val argCs =
-        for(i <- 0 until proto.getParameterTypes.size;
-            val t = proto.getParameterTypes.get(i))
-          yield
-            Type(t) match {
-              case t_ :Reflected[_] => t_.EigenType_.erasure
-              case t_ :OBJECT =>
-                assert(t_.klass != null)
-                t_.klass
-            }
-      val m = klass.getDeclaredMethod(name, argCs:_*)
+    final def \(mdesc:MethodDesc)(vargs: Val[Reflected[_]]*) : Val_ = {
+      val m = klass.getDeclaredMethod(mdesc.name, mdesc.argCs:_*)
       (this\m)(vargs:_*)
     }
     
@@ -47,25 +37,17 @@ extends OBJECT(raw) with Reflected[ET] {
     final def applyDynamic(name: String, args: Any*) =
       (this\name)(args.asInstanceOf[Seq[Val[Reflected[_]]]]:_*)
       
-    final def \(m: reflect.Method)(vargs: Val[Reflected[_]]*): Val_ = {
-      val retT = Reflected(m.getReturnType).get
-      
+    private[this] final def \(m: reflect.Method)(vargs: Val[Reflected[_]]*): Val[Reflected[_]] = {
       type Args = Seq[VAL[Reflected[_]]]
-      def f(_args: Args) : VAL[retT.type] = {
-        if(_args exists (_.isUnknown))
-          return retT unknown Val((_args :+ inst):_*)
-        val args = _args.asInstanceOf[Seq[INST[Reflected_]]]
-        
-        val args_ = for(v <- args) yield v.asInstanceOf[v.typ.Instance].self.asInstanceOf[Object]
+      val f = liftCall(false, m, vargs:_*)
+      def g(_args: Args) = {
         val hash = self.hashCode
-        val ret: retT.EigenType = m.invoke(self, args_ :_*).asInstanceOf[retT.EigenType]
+        val ret = f(_args :+ inst)
         // Assert that we didn't mutate the lifted reference
         assert(self.hashCode == hash)
-        val deps = Val((args :+ inst):_*)
-        return retT instance(ret, deps)
+        ret
       }
-      
-      Val.eval (f(_:Args)) (vargs:_*)
+      Val.eval(g)(vargs:_*)
     }
     }
     final type Ref = Ref_
@@ -75,23 +57,42 @@ extends OBJECT(raw) with Reflected[ET] {
 }
 object Dynamic {
   /** Check if an instance method is liftable given an instance and args */
-  def isLiftableCall(spec:MethodSpec, vobj:Val_, vargs:Val_ *) = {
-    isLiftableMethod(spec) &&
+  def isLiftableCall(mdesc:MethodDesc, vobj:Val_, vargs:Val_ *) = {
+    mdesc.isLiftableI &&
     !(vobj satisfies (_.isUnknown)) &&
     (vargs forall (_.asSet forall (_.typ.isInstanceOf[Reflected[_]])))
   }
   /** Check if a static method is liftable given args */
-  def isLiftableStaticCall(spec:MethodSpec, vargs:Val_ *) = {
-    isLiftableMethod(spec) &&
+  def isLiftableStaticCall(mdesc:MethodDesc, vargs:Val_ *) = {
+    mdesc.isLiftableS &&
     (vargs forall (_.asSet forall (_.typ.isInstanceOf[Reflected[_]])))
   }
   
-  @inline
-  def isLiftableMethod(spec: MethodSpec) = {
-    val typ = Type(spec.getDefiningClass.getClassType).asInstanceOf[OBJECT]
-    val retT = Type(spec.getPrototype.getReturnType)
-    typ.isInstanceOf[Dynamic[_]] &&
-    retT.isInstanceOf[Reflected[_]]
+  def liftStaticCall(mdesc:MethodDesc, _vargs:Val_ *): Val[Reflected[_]] = {
+    assert(isLiftableStaticCall(mdesc, _vargs:_*))
+    val vargs = _vargs.asInstanceOf[Seq[Val[Reflected[_]]]]
+    val f = liftCall(true, mdesc.reflection.get, vargs:_*)
+    Val.eval(f)(vargs:_*)
+  }
+  
+  private def liftCall(isStatic: Boolean, m: reflect.Method, vargs: Val[Reflected[_]]*)
+              : Seq[VAL[Reflected[_]]] => VAL[Reflected[_]] = {
+    val retT = Reflected(m.getReturnType).get
+    type Args = Seq[VAL[Reflected[_]]]
+    def f(_args: Args) : VAL[retT.type] = {
+      if(_args exists (_.isUnknown))
+        return retT unknown Val(_args:_*)
+      val args = _args.asInstanceOf[Seq[INST[Reflected_]]]
+      val args_ = for(v <- args) yield v.asInstanceOf[v.typ.Instance].self.asInstanceOf[Object]
+      val ret: retT.EigenType =
+        if(isStatic)
+          m.invoke(null, args_ :_*).asInstanceOf[retT.EigenType]
+        else
+          m.invoke(args_.head, args_.tail :_*).asInstanceOf[retT.EigenType]
+      val deps = Val(args:_*)
+      return retT instance(ret, deps)
+    }
+    return f
   }
   
   val smeth_whitelist = {

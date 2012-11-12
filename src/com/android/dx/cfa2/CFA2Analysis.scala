@@ -457,6 +457,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     var continue = true
     do {
       eval_worklist find {!_._2} match {
+        case None         => continue = false
         case Some((m, _)) =>
           try { eval(m, new SFEnv, new HeapEnv) }
           catch {
@@ -469,7 +470,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               if(!opts.continueOnOverflow) throw e
           }
           eval_worklist(m) = true
-        case None         => continue = false
       } 
     } while(continue)
       
@@ -849,7 +849,62 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         
         /** Calls **/
         case code:Call =>
-          val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
+          val (mdesc, known) = {
+            val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
+            methodForSpec(spec) match {
+              case None    => (GhostMethod(spec), false)
+              case Some(m) => (m, true)
+            }
+          }
+          
+          // TODO: We may be able to look up the method if it's reflected
+          // FIXME: What if it returns void?
+          @inline
+          def call() =
+            if(known) call_known()
+            else      call_unknown()
+          
+          @inline
+          def call_unknown() = {
+            log('debug) ("Call unknown: "+mdesc)
+            val params = mkparams(operands).toSeq
+            val hookRets = (umethod_hooks map (_(mdesc, params))).flatten
+            val result =
+              if(hookRets isEmpty) Val.Unknown(mdesc.retT)
+              else hookRets reduce (_ union _)
+            eval_summary_(immutable.Set(THROWABLE),
+                          immutable.Set(RetVal.Return(result)))
+          }
+          @inline
+          def call_known() = {
+            val m = mdesc.asInstanceOf[Method]
+            log('debug) ("Call known: "+m)
+            val params = mkparams(operands).toSeq
+            val next_header = (mtracer.preheader :+ m).preheader :+ m
+            val next_phase = mtracePhases get next_header
+            next_phase match {
+              case Some(TracePhase.CleanupDone) =>
+                log('debug) ("Redundant trace; not calling: "+next_header)
+                // TODO: actually refine this to use the propagated unknowns
+                // though it may be the case that we eventually reach a fixed-point
+                // of induced unknowns via summarization...
+                call_unknown
+              case _ =>
+                try {
+                  var sum = trace(m, mtracer, mtracePhases, static_env, heap, params:_*)
+                  HOOK(kmethod_hooks, (m, params, sum), {sum = _:FSummary})
+                  eval_summary(sum)
+                }
+                catch {
+                  case e:StackOverflowError =>
+            	    log('error) ("Stack overflow when attempting to call "+m+" from "+meth+"\n"+
+            	                 "Consider increasing the JVM's stack size with -Xss#")
+            	    if(!opts.continueOnOverflow) throw e
+            	    else e.printStackTrace(opts.logs('warn).stream)
+            	    call_unknown
+                }
+            }
+          }
           
           @inline
           def mkparams(args: Iterable[Val_]) = {
@@ -894,83 +949,38 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             }
           }
           
-          @inline
-          def call_unknown(m: MethodDesc, retT: Instantiable) = {
-            log('debug) ("Call unknown: "+m)
-            val params = mkparams(operands).toSeq
-            val hookRets = (umethod_hooks map (_(spec, params))).flatten
-            val result =
-              if(hookRets isEmpty) Val.Unknown(retT)
-              else hookRets reduce (_ union _)
-            eval_summary_(immutable.Set(THROWABLE),
-                          immutable.Set(RetVal.Return(result)))
-          }
-          @inline
-          def call_known(m: Method, retT: Instantiable) = {
-            log('debug) ("Call known: "+m)
-            val params = mkparams(operands).toSeq
-            val next_header = (mtracer.preheader :+ m).preheader :+ m
-            val next_phase = mtracePhases get next_header
-            next_phase match {
-              case Some(TracePhase.CleanupDone) =>
-                log('debug) ("Redundant trace; not calling: "+next_header)
-                // TODO: actually refine this to use the propagated unknowns
-                // though it may be the case that we eventually reach a fixed-point
-                // of induced unknowns via summarization...
-                call_unknown(m, retT)
-              case _ =>
-                try {
-                  var sum = trace(m, mtracer, mtracePhases, static_env, heap, params:_*)
-                  HOOK(kmethod_hooks, (m, params, sum), {sum = _:FSummary})
-                  eval_summary(sum)
-                }
-                catch {
-                  case e:StackOverflowError =>
-            	    log('error) ("Stack overflow when attempting to call "+m+" from "+meth+"\n"+
-            	                 "Consider increasing the JVM's stack size with -Xss#")
-            	    if(!opts.continueOnOverflow) throw e
-            	    else e.printStackTrace(opts.logs('warn).stream)
-            	    call_unknown(m, retT)
-                }
-            }
-          }
-          
           code match {
-            case INVOKE_STATIC =>
-              val retT = Type(spec.getPrototype.getReturnType).asInstanceOf[Instantiable]
-              methodForSpec(spec) match {
-                case None    => call_unknown(GhostMethod(spec), retT)
-                case Some(m) => call_known(m, retT)
+            case INVOKE_STATIC => {
+              if(Dynamic.isLiftableStaticCall(mdesc, operands:_*)) {
+                log('debug) ("Lifting static call to "+mdesc)
+                
               }
+              else call()
+            }
             // FIXME: INVOKE_SUPER needs to actually call the super-method
             case _ => {
-              val typ = Type(spec.getDefiningClass.getClassType).asInstanceOf[OBJECT]
+              val typ = mdesc.parent.typ.asInstanceOf[OBJECT]
               val vobj = operands.head.asInstanceOf[Val[typ.type]]
               // TODO: Since the verifier has run, it must be true that all types of vobj are subtypes of typ;
               // We could perhaps harness this information...
               //assert(vobj.asSet forall (_.typ < typ == Tri.T))
-              val proto = spec.getPrototype.withFirstParameter(typ.raw)
-              val retT = Type(proto.getReturnType).asInstanceOf[Instantiable]
+              val proto = mdesc.prototype.withFirstParameter(typ.raw)
               
               // Can we dynamically lift this method?
-              if(Dynamic.isLiftableCall(spec, vobj, operands.tail:_*)) {
-                log('debug) ("Lifting call to "+spec.getNat.getName.getString)
+              if(Dynamic.isLiftableCall(mdesc, vobj, operands.tail:_*)) {
+                log('debug) ("Lifting instance call to "+mdesc)
                 val typ_ = typ.asInstanceOf[typ.type with Dynamic[_]]
                 val vargs = operands.tail.asInstanceOf[Seq[Val[`val`.Reflected[_]]]]
+                @inline
                 def call_dynamic(obj: typ_.Instance) = {
                   // TODO: catch exceptions and register them
-                  def f(ref: typ_.Instance#Ref) = (ref\spec)(vargs:_*)
+                  def f(ref: typ_.Instance#Ref) = (ref\mdesc)(vargs:_*)
                   obj~f
                 }
                 val ret = vobj eval_ ((obj:VAL[OBJECT]) => call_dynamic(obj.asInstanceOf[typ_.Instance]))
                 update_retval(ret)
               }
-              else methodForSpec(spec) match {
-                // TODO: We may be able to look up the method if it's reflected
-                // FIXME: What if it returns void?
-                case None    => call_unknown(GhostMethod(spec), retT)
-                case Some(m) => call_known(m, retT)
-              }
+              else call()
             }
           }
           // End invoke-handling
