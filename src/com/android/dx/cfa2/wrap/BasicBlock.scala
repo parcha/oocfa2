@@ -6,7 +6,7 @@ import dx.cfa2
 import cfa2._
 import scala.collection._
 
-final case class BasicBlock(val raw:RawBB, implicit val parent: Method) extends Immutable with NotNull {
+final case class BasicBlock private (val raw:RawBB, implicit val parent: Method) extends Immutable with NotNull {
   def label = raw.getLabel
   lazy val canCatch = raw.hasExceptionHandlers
   

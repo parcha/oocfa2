@@ -224,6 +224,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   
   // Setup global environment
 	{
+	  System.err.println("Logging to "+opts.outPath)
+    
 	  if(opts.extra_classpaths != None)
 	    for(url <- opts.extra_classpaths.get)
 	      BuiltinAnalysisClassLoader += url
@@ -852,7 +854,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           val (mdesc, known) = {
             val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
             methodForSpec(spec) match {
-              case None    => (GhostMethod(spec), false)
+              case None    => (GhostMethod.wrap(spec), false)
               case Some(m) => (m, true)
             }
           }

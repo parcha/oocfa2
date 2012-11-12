@@ -75,7 +75,7 @@ sealed trait MethodDesc extends Immutable with NotNull {
   override lazy val toString = id+"/"+arity
 }
 
-final case class Method(val raw:Raw, val rop:RopMethod) extends MethodDesc {
+final case class Method private (val raw:Raw, val rop:RopMethod) extends MethodDesc {
   lazy val blocks: BasicBlockSet = {
     val bbs = rop.getBlocks
     new BasicBlockSet(
@@ -94,19 +94,21 @@ final case class Method(val raw:Raw, val rop:RopMethod) extends MethodDesc {
   def nat = raw.getNat
   lazy val dump = rop.dump
 }
-object Method {
-  def wrap(raw:Raw, rop:RopMethod) = new Method(raw, rop)
+object Method extends Cacher[(Raw, RopMethod), Method] {
+  private def intern(raw:Raw, rop:RopMethod) = cache.cache((raw, rop), new Method(raw, rop))
+  def wrap(raw:Raw, rop:RopMethod) = cache cachedOrElse ((raw, rop), intern(raw, rop))
   implicit def unwrap(m:Method) = m.raw
 }
 
-final case class GhostMethod(val spec:MethodSpec) extends MethodDesc {
+final case class GhostMethod private (val spec:MethodSpec) extends MethodDesc {
   // FIXME: we need a way to "getEffectiveDescriptor" here...
   def prototype = spec.getPrototype
   def parent = GhostClass(spec.getDefiningClass)
   def nat = spec.getNat
   val isIMethod = Tri.U
 }
-object GhostMethod {
-  implicit def wrap(spec:MethodSpec) = new GhostMethod(spec)
+object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
+  private def intern(spec:MethodSpec) = cache.cache (spec, new GhostMethod(spec))
+  implicit def wrap(spec:MethodSpec) = cache cachedOrElse (spec, intern(spec))
   implicit def unwrap(gm:GhostMethod) = gm.spec
 }
