@@ -3,7 +3,7 @@ package com.android.dx.cfa2
 import scala.collection._
 import scala.reflect.runtime.universe._
 
-trait JSONOpts {
+trait StringOpts {
   val rawCfg: Map[String, Any]
   
   protected final def param__[T : TypeTag](p: String, default: T): T = param_[T](p) match {
