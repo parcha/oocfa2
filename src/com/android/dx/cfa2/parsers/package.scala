@@ -7,6 +7,35 @@ import parsing.input._
 
 package object parsers {
 
+  import scala.util.matching._
+  /** Gleaned from empirical testing and VMSpec 2nd Ed section 4.3 **/
+  val descriptorRegex = new Regex("(?x)^"+{
+    val hex = "[0-9a-f]" // Lowercase only
+    val base = "[BCDFIJSZV]"
+    val id = "(?:"+                      //start with...
+                "(?: \\p{Alpha}      |"+ //letter or...
+                "    [\\$_] \\p{Alpha}"+ //...symbol+letter
+                ")"+
+                "[\\w\\$]*"+ //end with as many id-chars as we like
+             ")"
+    val obj = "(?:L (?<classname>"+
+                      id+
+                      "(?:/"+id+")*"+ //Can't end on a /
+                   ")"+
+                 ";"+
+              ")"
+    val pseudo = "(?:addr|null)"
+    // Putting everything together...
+    "\\[*"+ //Array dims
+    "(?:"+
+       "(?:"+
+          "(?: N"+hex+"{4} )?"+ //Native?
+          obj+"?"+ //Object-type
+       ")|"+base+ //Or base-type
+    ")|<"+pseudo+">" //Or a pseudo-type (which can't be arrayed)
+  }+"$",
+  "classname")
+  
   trait RichParsers extends RegexParsers with PackratParsers {
     protected final val eol = "\r\n" | "\n"
     

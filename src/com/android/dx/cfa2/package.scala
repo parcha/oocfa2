@@ -21,36 +21,6 @@ package object cfa2 {
   }
   }
   
-  /* ======================== Parsing ================ */
-  import scala.util.matching._
-  /** Gleaned from empirical testing and VMSpec 2nd Ed section 4.3 **/
-  val descriptorRegex = new Regex("(?x)^"+{
-    val hex = "[0-9a-f]" // Lowercase only
-    val base = "[BCDFIJSZV]"
-    val id = "(?:"+                      //start with...
-                "(?: \\p{Alpha}      |"+ //letter or...
-                "    [\\$_] \\p{Alpha}"+ //...symbol+letter
-                ")"+
-                "[\\w\\$]*"+ //end with as many id-chars as we like
-             ")"
-    val obj = "(?:L (?<classname>"+
-                      id+
-                      "(?:/"+id+")*"+ //Can't end on a /
-                   ")"+
-                 ";"+
-              ")"
-    val pseudo = "(?:addr|null)"
-    // Putting everything together...
-    "\\[*"+ //Array dims
-    "(?:"+
-       "(?:"+
-          "(?: N"+hex+"{4} )?"+ //Native?
-          obj+"?"+ //Object-type
-       ")|"+base+ //Or base-type
-    ")|<"+pseudo+">" //Or a pseudo-type (which can't be arrayed)
-  }+"$",
-  "classname")
-  
   /* ============ Exceptions =================== */
   /** This is an assertion/requirement stemming from reasonable program input/configuration **/
   final class PresumptionException(msg: String, cause: Throwable = null) extends Exception(msg, cause)
@@ -124,31 +94,6 @@ package object cfa2 {
   type SMethodSpec = MethodSpec
   
   /* ============= Class-loading/lifting hackery =========== */
-  import java.net.{URLClassLoader, URL}
-  class AnalysisClassLoader(parent: ClassLoader, urls: Iterable[URL] = List())
-  extends URLClassLoader(urls.toArray, parent) {
-    
-    def reflectClass(name: String) : Option[Class[_]] =
-      try Some(loadClass(name))
-      catch {
-        case _:ClassNotFoundException =>
-          warn("Couldn't find class for reflection: "+name)
-          None
-        case e:NoClassDefFoundError =>
-          warn("In attempting to load "+name+" for reflection, a depedency could not be found: "+e.getMessage)
-          None
-      }
-    
-    private[cfa2] def +=(url: URL) = super.addURL(url)
-    
-    private[cfa2] def registerRawClass(name: String, data: Array[Byte]) =
-      defineClass(name, data, 0, data.length)
-    
-    protected[this] def warn(msg:String) =
-      // FIXME: HACK: for now, we just pull the singleton and warn that way
-      CFA2Analysis.singleton.opts.log('warn)(msg)
-  }
-  
   import java.io.File
   val analysisClasspath : immutable.Seq[File] = immutable.Seq(
     "."
@@ -156,6 +101,7 @@ package object cfa2 {
   assert(analysisClasspath forall (_.exists))
   object BuiltinAnalysisClassLoader extends AnalysisClassLoader(ClassLoader.getSystemClassLoader,
                                                                 (analysisClasspath map (_.toURL)))
+  val analysisMirror = scala.reflect.runtime.universe.runtimeMirror(BuiltinAnalysisClassLoader)
   
   /* ============ Hooks ================== */
   import `val`._
@@ -164,7 +110,7 @@ package object cfa2 {
                            IParams]
   type CloneHook = Hook[(Instantiable#Instance, Val_, IParams),
                         IParams]
-  type UnknownMethodHook = Hook[(MethodSpec, Seq[Val_]),
+  type UnknownMethodHook = Hook[(wrap.MethodDesc, Seq[Val_]),
                                 Val_]
   type KnownMethodHook = Hook[(wrap.Method, Seq[Val_], CFA2Analysis.FSummary),
                               CFA2Analysis.FSummary]
