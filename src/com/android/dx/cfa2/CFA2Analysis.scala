@@ -953,7 +953,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case INVOKE_STATIC => {
               if(Dynamic.isLiftableStaticCall(mdesc, operands:_*)) {
                 log('debug) ("Lifting static call to "+mdesc)
-                
+                update_retval(Dynamic.liftStaticCall(mdesc, operands:_*))
               }
               else call()
             }
