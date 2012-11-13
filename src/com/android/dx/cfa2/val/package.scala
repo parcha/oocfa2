@@ -10,6 +10,8 @@ import scala.collection._
 
 package object `val` {
   
+  type ARRAY = Instantiable#Array
+  
   type IParams = immutable.Map[Symbol, Any]
   
   type Val_ = Val[Instantiable]

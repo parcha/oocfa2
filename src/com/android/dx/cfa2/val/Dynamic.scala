@@ -16,15 +16,15 @@ import scala.reflect.ClassTag
 abstract class Dynamic[ET](raw: RawType)(final implicit val EigenType_ : ClassTag[ET])
 extends OBJECT(raw) with Reflected[ET] {
   import Dynamic._
+  
   protected[this] final val constructor = new Instance(_, _)
   
   protected[this] final class Instance_(params: IParams, deps: Val_)
-  extends super[OBJECT].Instance_(params, deps) with super[Reflected].Instance_
-  with scala.Dynamic { inst:Instance =>
+  extends super[OBJECT].Instance_(params, deps) with super[Reflected].Instance_ { inst:Instance =>
     
     protected[this] final class Ref_(env: HeapEnv) extends super.Ref_(env) { _:Ref =>
     final def \(mdesc:MethodDesc)(vargs: Val[Reflected[_]]*) : Val_ = {
-      val m = klass.getDeclaredMethod(mdesc.name, mdesc.argCs:_*)
+      val m = klass.getDeclaredMethod(mdesc.name, mdesc.argCs.get:_*)
       (this\m)(vargs:_*)
     }
     

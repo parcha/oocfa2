@@ -4,7 +4,7 @@ import scala.collection._
 import scala.reflect.runtime.universe._
 
 trait StringOpts {
-  val rawCfg: Map[String, Any]
+  protected[this] val rawCfg: Map[String, Any]
   
   protected final def param__[T : TypeTag](p: String, default: T): T = param_[T](p) match {
     case None    => default

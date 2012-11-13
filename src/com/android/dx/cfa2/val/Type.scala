@@ -97,7 +97,7 @@ object Type extends Registrar[RawType, Type] {
     //implicit val lifter : scala.Fractional[Self#Instance]
   }
   
-  trait NotBuiltIn extends Type
+  trait NotBuiltIn extends OBJECT
   trait Incomplete extends NotBuiltIn
   
   def apply(raw: RawType) = intern(raw)
@@ -125,7 +125,7 @@ object Type extends Registrar[RawType, Type] {
     assert(!raw.isPrimitive)
     if(raw.isArray) {
       // Recurse through nested array types
-      def drill(raw:RawType) : Instantiable#Array = {
+      def drill(raw:RawType) : ARRAY = {
         val t =
           if(raw.isArray) drill(raw.getComponentType)
           else Type(raw).asInstanceOf[Instantiable]

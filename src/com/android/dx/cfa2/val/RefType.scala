@@ -8,6 +8,7 @@ import env._
 import `var`._
 
 import scala.collection._
+import scala.reflect.classTag
 
 abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) with Type.CanBeParam {
   import RefType._
@@ -98,6 +99,7 @@ object RefType {
  *  * Should this extend OBJECT? If so, how are e.g. fields dealt with?
  */
 object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
+  val klass = classTag[javax.lang.model.`type`.NullType].runtimeClass
   /*  NULL subtypes all RefTypes
    *  Additionally, we don't have an unknown case here because
    *  the only unknown types we could encounter would have to be
@@ -129,7 +131,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
   //lazy val Interfaces = 
   
   final val className = descriptorMatch.group("classname").replace('/', '.')
-  final val klass = BuiltinAnalysisClassLoader.reflectClass(className) match {
+  val klass = BuiltinAnalysisClassLoader.reflectClass(className) match {
     case None    => null
     case Some(c) => c
   }

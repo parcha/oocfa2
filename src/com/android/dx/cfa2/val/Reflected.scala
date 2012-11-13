@@ -8,10 +8,11 @@ import scala.reflect.ClassTag
 import scala.collection.{parallel => par, _}
 import scala.ref.WeakReference
 
-trait Reflected[ET] extends Instantiable {
+trait Reflected[ET] extends Instantiable with DelayedInit {
   import Reflected._
   type EigenType = ET
   implicit val EigenType_ : ClassTag[EigenType]
+  override final val klass = EigenType_.runtimeClass
   
   require(EigenType_ != null)
   if(this.isInstanceOf[OBJECT])
@@ -25,7 +26,15 @@ trait Reflected[ET] extends Instantiable {
   
   protected[this] val default: ET
   
-  instance_param_[ET]('self, default, {_!=null})
+  // Hack for proper initialization; really just want this one clause to be executed after
+  // all other initialization phases, but without the if-statement, this would be executed
+  // at every init @_@
+  def delayedInit(body) = {
+  body
+  if(!isIParamRegistered('self)) {
+    instance_param_[ET]('self, default, {_!=null})
+  }
+  }
   protected[this] trait Instance_ extends super.Instance_ { _:Instance =>
     final lazy val self = param[ET]('self) 
   }

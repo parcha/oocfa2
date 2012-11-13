@@ -6,6 +6,8 @@ import scala.collection.{parallel=>par, _}
 
 package object cfa2 {
 
+  object SysProps extends scala.sys.SystemProperties
+  
   /* ============= Convenience ============ */
   import dx.rop.cst._
   def liftConstant(cst:TypedConstant) = {

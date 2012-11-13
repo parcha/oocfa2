@@ -5,21 +5,22 @@ import dx.cfa2
 import cfa2._
 import Type._
 import env._
-
 import dx.rop.`type`.{Type => RawType, _}
-
 import scala.collection.{parallel => par, _}
+import scala.reflect.ClassTag
 
 /**
  * Represents a type which may have run-time values of it. They should be defined
  * according to the rules set out by Type.
  */
 abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
+  import Instantiable._
   
   // Open-recursion through Self at the type-level
   //type Self >: this.type <: Instantiable
   //type Self <: this.type
   final type Self = this.type
+  val klass : Class[_]
   
   /** Some "instantiables" aren't actually usable (*cough*void*cough*) **/
   val isGhost = !this.isInstanceOf[CanBeParam]
@@ -165,48 +166,19 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   
   /** Param -> (type, default if optional, constraint checker) */
   private[this] val iparamRegistry: mutable.Map[Symbol, IParamRegistryEntry[_<:Any]] = mutable.Map()
-  private final case class IParamRegistryEntry[T](
-    manifest: ClassManifest[T],
-    default: Option[Either[() => _<:T, T]],
-    checker: T => Unit,
-    converter: Any => T
-  ) {
-    require(manifest != null &&
-            default != null)
-    type T_ = T
-    def check(v:Any) = if(checker!=null) checker(v.asInstanceOf[T])
-    // Left means we generated, right means we didn't
-    def genDefault: Either[T, T] = default match {
-      case None => throw new RuntimeException
-      case Some(e) => e match {
-        case Left(f) => Left(f())
-        case Right(d) => Right(d)
-      }
-    }
-    // For when you don't care either way
-    def genDefault_ : T = genDefault match {
-      case Left(l)  => l
-      case Right(r) => r
-    }
-    def convert(v: Any) =
-      if(converter == null) v.asInstanceOf[T]
-      else converter(v)
-    def clone(default: Option[Either[() => _<:T, T]]=default,
-              checker: T => Unit=checker) = IParamRegistryEntry[T](manifest, default, checker, converter)
-  }
   /** Subclasses should use this declarative API to denote the params that an instance requires */
-  protected final def instance_param[T](sym: Symbol,
-                                        checker: T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) : Unit = {
+  protected[this] final def instance_param[T]
+  (sym: Symbol, checker: T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) : Unit = {
     require(!(iparamRegistry contains sym))
     iparamRegistry(sym) = IParamRegistryEntry[T](m, None, checker, converter)
   }
-  protected final def instance_param_[T](sym: Symbol, default: T,
-                                         checker:T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) = {
+  protected[this] final def instance_param_[T]
+  (sym: Symbol, default: T, checker:T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) = {
     require(!(iparamRegistry contains sym))
     iparamRegistry(sym) = IParamRegistryEntry[T](m, Some(Right(default)), checker, converter)
   }
-  protected final def instance_param__[T](sym: Symbol, defaulter: ()=>T,
-                                          checker:T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) = {
+  protected[this] final def instance_param__[T]
+  (sym: Symbol, defaulter: ()=>T, checker:T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) = {
     require(!(iparamRegistry contains sym))
     iparamRegistry(sym) = IParamRegistryEntry[T](m, Some(Left(defaulter)), checker, converter)
   }
@@ -217,6 +189,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     entry.check(default)
     iparamRegistry(sym) = entry.clone(default=Some(Right(default)))
   }*/
+  
+  protected[this] final def isIParamRegistered(sym: Symbol) = iparamRegistry.contains(sym)
   
   /**
    * Constructs a fresh Instance
@@ -251,6 +225,9 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     final val component_typ = self
     type Entry = Val[component_typ.type]
     private type Repr = GenMap[Int, Entry]
+    final val klass =
+      if(component_typ.klass == null) null
+      else ClassTag(component_typ.klass).wrap.runtimeClass
     
     instance_param_[Repr]('array, new par.immutable.ParHashMap())
     instance_param[Val[INT.type]]('length)
@@ -320,9 +297,41 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     assert(component_typ.isInstanceOf[Reflected[_]])
   }*/
 }
+object Instantiable {
+  private case class IParamRegistryEntry[T](
+    manifest: ClassManifest[T],
+    default: Option[Either[() => _<:T, T]],
+    checker: T => Unit,
+    converter: Any => T
+  ) {
+    require(manifest != null &&
+            default != null)
+    type T_ = T
+    def check(v:Any) = if(checker!=null) checker(v.asInstanceOf[T])
+    // Left means we generated, right means we didn't
+    def genDefault: Either[T, T] = default match {
+      case None => throw new RuntimeException
+      case Some(e) => e match {
+        case Left(f) => Left(f())
+        case Right(d) => Right(d)
+      }
+    }
+    // For when you don't care either way
+    def genDefault_ : T = genDefault match {
+      case Left(l)  => l
+      case Right(r) => r
+    }
+    def convert(v: Any) =
+      if(converter == null) v.asInstanceOf[T]
+      else converter(v)
+    def clone(default: Option[Either[() => _<:T, T]]=default,
+              checker: T => Unit=checker) = IParamRegistryEntry[T](manifest, default, checker, converter)
+  }
+}
 
 /** This is just a really weird type */
 object RETADDR extends Instantiable(RawType.RETURN_ADDRESS) {
+  val klass = null
   val constructor = new Instance(_, _)
   protected final class Instance_ (params: IParams, deps: Val_) extends super.Instance_(params, deps)
   type Instance = Instance_

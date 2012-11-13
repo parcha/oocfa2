@@ -12,6 +12,7 @@ sealed trait PrimitiveType extends Instantiable {
 }
 
 object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton {
+  val klass = null
   override lazy val singleton = Instance_
   protected[this] object Instance_ extends super.Instance_(paramify(), Val.Bottom)
   type Instance = Instance_
@@ -33,7 +34,7 @@ extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBePa
     if(deps != Val.Bottom) None // Only cache fresh values
     else if(cacheHook != null) (cacheHook.lift)(self)
     else None
-  
+    
   protected[this] final val constructor = new Instance(_, _)
   protected[this] final class Instance_(params: IParams, deps:Val_)
   extends super[PrimitiveType].Instance_(params, deps) with super[Reflected].Instance_

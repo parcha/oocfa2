@@ -43,10 +43,10 @@ object CFA2Analysis {
     def continueOnOverflow = !debug
     
     lazy val extra_classpaths: Option[List[java.net.URL]] = None
-    lazy val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
+    protected[CFA2Analysis] lazy val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
     
-    protected def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
-    protected def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
+    protected[this] def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
+    protected[this] def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
       (sym, new DualLogger(primary, mkLog(sym)._2))
       
     protected[this] def _logs = immutable.Map(
@@ -64,8 +64,6 @@ object CFA2Analysis {
       def apply(l: Symbol) = logs(l)
     }
   }
-  
-  final case class Results() extends Immutable
   
   type EncodedTrace = scala.Array[Int]
   type TracerRepr[E] = immutable.Vector[E]
@@ -761,13 +759,13 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         
         /** Array ops **/
         case code:ArrayOp =>
-          val varray = operands(0).asInstanceOf[Val[Instantiable#Array]]
+          val varray = operands(0).asInstanceOf[Val[ARRAY]]
           val index = operands(1).asInstanceOf[Val[INT.type]]
           code match {
-            case AGET => result = varray eval_ ((arr:VAL[Instantiable#Array]) =>
+            case AGET => result = varray eval_ ((arr:VAL[ARRAY]) =>
               if(arr.isUnknown) Val.Unknown(resultT) // TODO
               else {
-                arr.asInstanceOf[Instantiable#Array#Instance] ~ (_.apply(index) match {
+                arr.asInstanceOf[ARRAY#Instance] ~ (_.apply(index) match {
                   case None    => Val.Unknown(resultT) // TODO
                   case Some(v) => v
                 })

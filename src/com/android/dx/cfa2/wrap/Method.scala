@@ -29,24 +29,34 @@ sealed trait MethodDesc extends Immutable with NotNull {
   
   // Reflection support
   import java.lang.reflect
-  final lazy val argCs : Seq[java.lang.Class[_]] =
+  final lazy val argCs : Option[Seq[java.lang.Class[_]]] =
+    if(_argCs contains None) None
+    else Some(_argCs.flatten)
+  /** More primitive argCs that lets one see which args in particular failed **/
+  final lazy val _argCs : Seq[Option[java.lang.Class[_]]] =
     for(i <- 0 until arity;
         val t = prototype.getParameterTypes.get(i))
       yield
-        Type(t) match {
-          case t_ :Reflected[_] => t_.EigenType_.erasure
-          case t_ :OBJECT =>
-            assert(t_.klass != null)
-            t_.klass
+        Type(t).asInstanceOf[Instantiable].klass match {
+          case null  => None
+          case klass => Some(klass)
         }
   final lazy val reflection: Option[reflect.Method] = parent.typ match {
     case typ:OBJECT => typ.klass match {
       case null => None
-      case klass => try {
-        Some(klass.getDeclaredMethod(name, argCs:_*))
-      }
-      catch {
-        case e:Exception => None
+      case klass => argCs match {
+        case None  => None
+        case Some(argCs) => try {
+          //CFA2Analysis.singleton.opts.log('debug) ("Seeking reflection for "+name)
+          val refl = klass.getDeclaredMethod(name, argCs:_*)
+          //CFA2Analysis.singleton.opts.log('debug) ("Found as "+refl)
+          Some(refl)
+        }
+        catch {
+          case e:Exception => None
+          // Hack until we can get the classloader to cooperate
+          case e:NoClassDefFoundError => None
+        }
       }
     }
   }
@@ -55,7 +65,8 @@ sealed trait MethodDesc extends Immutable with NotNull {
     assert(+isIMethod)
     val typ = parent.typ.asInstanceOf[OBJECT]
     typ.isInstanceOf[Dynamic[_]] &&
-    retT.isInstanceOf[Reflected[_]]
+    retT.isInstanceOf[Reflected[_]] &&
+    argCs != None
   }
   final lazy val isLiftableS = {
     assert(-isIMethod)
@@ -72,7 +83,10 @@ sealed trait MethodDesc extends Immutable with NotNull {
   
   val isIMethod: Tri
   
-  override lazy val toString = id+"/"+arity
+  override lazy val toString = reflection match {
+    case Some(refl) => refl toString
+    case None       => id+"/"+arity
+  }
 }
 
 final case class Method private (val raw:Raw, val rop:RopMethod) extends MethodDesc {
@@ -85,7 +99,7 @@ final case class Method private (val raw:Raw, val rop:RopMethod) extends MethodD
   
   lazy val props = prop.Range(prop.Domain.Method, accessFlags)
   def is(prop: Property*) = props contains(prop:_*)
-  def parent = GhostClass(raw.getDefiningClass)
+  lazy val parent = GhostClass(raw.getDefiningClass)
   def accessFlags = raw.getAccessFlags
   def prototype = raw.getEffectiveDescriptor
   def attributes(attr: String) = raw.getAttributes.findFirst(attr)
