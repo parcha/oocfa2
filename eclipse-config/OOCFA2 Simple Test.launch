@@ -18,6 +18,6 @@
 <stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="com.android.dx.cfa2.test.ScalaExecutionHook"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--optimize=devtest --scope=unit --no-locals dacapo-9.12-bach.jar"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="oocfa2-test"/>
-<stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-ea -Xmx2g -Xss8m&#10;-XX:+UseThreadPriorities&#10;-XX:+UseFastAccessorMethods&#10;-XX:+UseFastEmptyMethods&#10;-XX:+UseSSE42Intrinsics&#10;-XX:+UseCompressedOops&#10;-XX:+DoEscapeAnalysis"/>
+<stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-ea -Xmx2g -Xss1m&#10;-XX:+UseThreadPriorities&#10;-XX:+UseFastAccessorMethods&#10;-XX:+UseFastEmptyMethods&#10;-XX:+UseSSE42Intrinsics&#10;-XX:+UseCompressedOops&#10;-XX:+DoEscapeAnalysis"/>
 <stringAttribute key="org.eclipse.jdt.launching.WORKING_DIRECTORY" value="/home/alex/Projects/Research/benchmarks"/>
 </launchConfiguration>
