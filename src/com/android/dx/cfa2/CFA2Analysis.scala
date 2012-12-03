@@ -739,13 +739,14 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               var npe = false
               def get_field(v:VAL[RefType]) : Val_ = v match {
                 case Null_?() =>
-                  // FIXME: Propagate NPE
+                  // FIXME: What if we are guaranteed an NPE?
                   log('warn) (s"Found null pointer exception when getting slot $slot of $v")
                   npe = true
                   Val.Bottom
                 case OBJECT_?(v: VAL[OBJECT]) => v match {
                   case Known_?(v)   => v~{_.apply(slot)}
                   case Unknown_?(v) =>
+                    log('debug) (s"Possible null pointer exception when getting slot $slot of $v")
                     npe = true
                     val field = v.typ.fieldSlots getOrRegister spec
                     Val.Unknown(field.typ)
@@ -775,7 +776,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   Val.Bottom
                 // Unknown for Object is actually also an Instance; since we're putting, it doesn't matter
                 case OBJECT_?(v: INST[OBJECT]) =>
-                  if(+v.isNull) npe = true
+                  if(+v.isNull) {
+                    log('debug) (s"Possible null pointer exception when putting field $field in $slot of $v")
+                    npe = true
+                  }
                   v ~~ (_.apply(slot, field))
               }
               if(npe) uncaught += Exceptionals.NULL_POINTER
@@ -804,7 +808,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; it'll handle indexing properly
                 case ARRAY_?(arr: INST[A]) =>
-                  if(+arr.isNull) npe = true
+                  if(+arr.isNull) {
+                    log('debug) (s"Possible null pointer exception when getting at $index in array $arr")
+                    npe = true
+                  }
                   arr.~[resultT.type](get_)
               }
               // Actually returns Val[arr.referee.typ.component_typ.type], but Scala can't convert that function to a value
@@ -818,6 +825,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 case Within(res) =>
                   get__(res).asInstanceOf[Val[resultT.type]]
                 case Maybe(res) =>
+                  log('debug) (s"Possible array-index-out-of-bounds exception when getting at $index in array $arr")
                   oob = true
                   get__(res).asInstanceOf[Val[resultT.type]]
                 case Outside =>
@@ -845,7 +853,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; since we're putting, it doesn't matter
                 case ARRAY_?(arr: INST[A]) =>
-                  if(+arr.isNull) npe = true
+                  if(+arr.isNull) {
+                    log('debug) (s"Possible null pointer exception when putting $entry at $index in array $arr")
+                    npe = true
+                  }
                   Val.Bottom//arr.~[A](put_)
               }
               // FIXME: Add checking for array-storage exception
@@ -854,6 +865,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 case Within(new_arr) =>
                   Val.Atom(new_arr).asInstanceOf[Val[A]]
                 case Maybe(new_arr) =>
+                  log('debug) (s"Possible array-index-out-of-bounds exception when putting $entry at $index in array $arr")
                   oob = true
                   Val.Atom(new_arr).asInstanceOf[Val[A]]
                 case Outside =>
@@ -876,17 +888,20 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case MONITOR_EXIT  => false
           }
           var npe = false
-          def set_monitored(v:VAL[RefType]) : Val[OBJECT] = Val.Bottom/*v match {
-            /*case Null_?() =>
+          def set_monitored(v:VAL[RefType]) : Val[OBJECT] = v match {
+            case Null_?() =>
               // FIXME: What if we are guaranteed an NPE?
-              log('warn) ("Found null pointer exception when changing monitor on"+v)
+              log('warn) (s"Found null pointer exception when changing monitor on $v")
               npe = true
-              Val.Bottom*/
+              Val.Bottom
             // Unknown for Object is actually also an Instance
             case OBJECT_?(v: INST[OBJECT]) =>
-              if(+v.isNull) npe = true
+              if(+v.isNull) {
+                log('debug) (s"Possible null pointer exception when changing monitor on $v")
+                npe = true
+              }
               v ~~ (_.monitored = monitored)
-          }*/
+          }
           if(npe) uncaught += Exceptionals.NULL_POINTER
           val new_obj = obj eval_ set_monitored
           tracef = tracef +# (srcs(0), new_obj)
@@ -897,7 +912,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           result = code match {
             case NEW_INSTANCE     => Val.Atom(typ.instance())
             case NEW_ARRAY        => {
-              /*val atyp = typ.asInstanceOf[ARRAY_]
+              val atyp = typ.asInstanceOf[ARRAY_]
               val len = operands(0).asInstanceOf[Val[INT.type]]
               var neg_len = false
               val varray: GenSet[Val[ARRAY_]] =
@@ -906,6 +921,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                     case Tri.T =>
                       Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
                     case Tri.U =>
+                      log('debug) (s"Possible negative array size exception when allocating new array of size $len")
                       neg_len = true
                       Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
                     case Tri.F =>
@@ -915,8 +931,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                       Val.Bottom
                   }
               if(neg_len) uncaught += Exceptionals.NEGATIVE_ARRAY_SIZE
-              varray reduce Val.union[ARRAY_, ARRAY_, ARRAY_]*/
-              Val.Bottom
+              varray reduce Val.union[ARRAY_, ARRAY_, ARRAY_]
             }
             // TODO
             case FILLED_NEW_ARRAY => {
@@ -953,21 +968,20 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         case CONST => result = liftConstant(cst)
         
         case ARRAY_LENGTH => result = {
-          type A = ARRAY[T] forSome {type T <: Instantiable}
+          type A = ARRAY[_]
           val varray = operands(0).asInstanceOf[Val[A]]
           var npe = false
-          def len(arr:VAL[A]): Val[INT.type] = Val.Bottom/*arr match {
-            /*case Null_?() =>
+          def len(arr:VAL[A]): Val[INT.type] = arr match {
+            case Null_?() =>
               // FIXME: What if we are guaranteed an NPE?
               log('debug) ("Found null pointer exception when getting length of array "+arr)
               npe = true
-              Val.Bottom*/
-            // Unknown for Array is actually also an Instance; it'll handle indexing properly
-            case Subtype_?(arr: INST[A]) =>
-              if(+arr.isNull) npe = true
-              //arr~~(_.length)
               Val.Bottom
-          }*/
+            // Unknown for Array is actually also an Instance; it'll handle indexing properly
+            case ARRAY_?(arr: INST[A]) =>
+              if(+arr.isNull) npe = true
+              arr~~(_.length)
+          }
           if(npe) uncaught += Exceptionals.NULL_POINTER
           varray eval_ len
         }
