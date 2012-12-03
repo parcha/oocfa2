@@ -10,18 +10,15 @@ import immutable._
 import parallel.immutable._
 
 sealed abstract class Val[+T <: Instantiable]
-extends immutable.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable with NotNull{
+extends Immutable with Serializable with NotNull{
   import Val._
   // TODO: Allow us to infer/capture the LUB of the typs of these vals
   final type Type = T
   /** The type of functions taking these VALs and returning R */
   final type F[R] = VAL[T] => R
   
-  // Set proxy
-  final def self: CSet[VAL[T @uncheckedVariance]] = asSet.seq
   def asSet: GenSet[VAL[T @uncheckedVariance]]
-  
-  override lazy val size = super.size  
+  lazy val size = asSet.size  
   
   final def union[T <: Instantiable](that:Val[T]) =
     Val.union(this, that)
@@ -42,7 +39,7 @@ extends immutable.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serial
   
   final def satisfies (test: VAL[T] => Boolean) = asSet exists test
   
-  def =?[T_ <: T](that: Val[T_]): Tri = that match {
+  def =?[T_ <: T @uncheckedVariance](that: Val[T_]): Tri = that match {
     case Bottom => Tri.F
     case Top    => Tri.U
     case _      => this.asSet == that.asSet
@@ -165,6 +162,6 @@ object Val {
   type UnionSet_ = UnionSet[Instantiable]
   object UnionSet {
     def apply[J <: Instantiable](vs: SUBV[SUBT[J]]*) = new UnionSet[J](Set(vs:_*))
-    def unapplySeq[J <: Instantiable](u:UnionSet[J]) : Option[CSeq[SUBV[J]]] = Some(u.toSeq)
+    def unapplySeq[J <: Instantiable](u:UnionSet[J]) : Option[CSeq[SUBV[J]]] = Some(u.asSet.toSeq.seq)
   }
 }

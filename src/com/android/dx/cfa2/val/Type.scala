@@ -121,50 +121,51 @@ object Type extends Registrar[RawType, Type] {
       registerIncomplete(raw)
     case Not   => registerIncomplete(raw)
   }
-  // Not a pre-registered type; most importantly: must be a reftype ergo an OBJECT
-  private def registerIncomplete(raw: RawType) : Type = {
+  // Not a pre-registered type; most importantly: must be a reftype
+  private def registerIncomplete(raw: RawType) : RefType = {
     assert(!raw.isPrimitive)
-    if(raw.isArray) {
-      // Recurse through nested array types
-      def drill(raw:RawType) : ARRAY_ = {
-        val t =
-          if(raw.isArray) drill(raw.getComponentType)
-          else Type(raw).asInstanceOf[Instantiable]
-        t.Array
-      }
-      drill(raw)
+    if(raw.isArray) registerArray(raw)
+    else registerReflected(raw)
+  }
+  private def registerArray(raw: RawType) : ARRAY_ = {
+    // Recurse through nested array types
+    def drill(raw:RawType) : ARRAY_ = {
+      val t =
+        if(raw.isArray) drill(raw.getComponentType)
+        else Type(raw).asInstanceOf[Instantiable]
+      t.Array
     }
-    else {
-      lazy val default =
-        new OBJECT(raw) with Incomplete {
-          protected val constructor = new Instance(_, _)
-          protected class Instance_ private[`val`] (params: IParams, deps: Val_)
-          extends super.Instance_(params, deps) {
-            class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
-            type Ref = Ref_
-            protected[this] val ref = new Ref(_)
-          }
-          type Instance = Instance_
+    drill(raw)
+  }
+  private def registerReflected(raw: RawType) : OBJECT with Incomplete = {
+    lazy val default: OBJECT with Incomplete =
+      new OBJECT(raw) with Incomplete {
+        protected val constructor = new Instance(_, _)
+        protected class Instance_ private[`val`] (params: IParams, deps: Val_)
+        extends super.Instance_(params, deps) {
+          class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
+          type Ref = Ref_
+          protected[this] val ref = new Ref(_)
         }
-      // FIXME: Somehow dynamically inject dependencies here, or at least macroize built-ins
-      // HACK: seek out exceptionals and register them appropriately
-      BuiltinAnalysisClassLoader.reflectClass(raw) match {
-        case None => default
-        case Some(klass) => ClassTag(klass) match {
-          case t if t <:< classTag[Throwable] =>
-            new Exceptionals.THROWABLE(raw) with Incomplete {
-              protected val constructor = new Instance(_, _)
-              protected class Instance_ private[`val`] (params: IParams, deps: Val_)
-              extends super.Instance_(params, deps) {
-                class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
-                type Ref = Ref_
-                protected[this] val ref = new Ref(_)
-              }
-              type Instance = Instance_
+        type Instance = Instance_
+      }
+    // FIXME: Somehow dynamically inject dependencies here, or at least macroize built-ins
+    // HACK: seek out exceptionals and register them appropriately
+    BuiltinAnalysisClassLoader.reflectClass(raw) match {
+      case None => default
+      case Some(klass) => ClassTag(klass) match {
+        case t if t <:< classTag[Throwable] =>
+          new Exceptionals.THROWABLE(raw) with Incomplete {
+            protected val constructor = new Instance(_, _)
+            protected class Instance_ private[`val`] (params: IParams, deps: Val_)
+            extends super.Instance_(params, deps) {
+              class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
+              type Ref = Ref_
+              protected[this] val ref = new Ref(_)
             }
-          case _ => default
-        }
-          
+            type Instance = Instance_
+          }
+        case _ => default
       }
     }
   }

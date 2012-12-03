@@ -63,14 +63,36 @@ package object `val` {
   }
   object Subtype_? {
     // FIXME: somehow make this only work for built-in types; a problem given Scala doesn't do type negation
-    def unapply[T <: Instantiable, V[T] <: VAL[T]](v:V[T]): Option[V[T]] =
+    def unapply[V[_ <: Instantiable] <: VAL[_],
+                T <: Instantiable : V]
+               (v:V[_]): Option[V[T]] =
       if(v.typ.isInstanceOf[T]) Some(v.asInstanceOf[V[T]])
       else None
   }
   object OBJECT_? {
-    def unapply[T <: Instantiable, V[T] <: VAL[T]](v:V[T]): Option[V[OBJECT]] =
+    def unapply[V[_ <: Instantiable] <: VAL[_]]
+               (v:V[_]): Option[V[OBJECT]] =
       if(v.typ.isInstanceOf[OBJECT]) Some(v.asInstanceOf[V[OBJECT]])
       else None
+  }
+  object ARRAY_? {
+    def unapply[V[_ <: Instantiable] <: VAL[_]]
+               (v:V[_]): Option[V[ARRAY_]] = {
+      if(v.typ.isInstanceOf[ARRAY_])
+          Some(v.asInstanceOf[V[ARRAY_]])
+      None
+    }
+  }
+  object ARRAY__? {
+    def unapply[V[_ <: Instantiable] <: VAL[_],
+                A <: ARRAY[T] : V,
+                T <: Instantiable]
+               (v:V[_]): Option[V[A]] = {
+      if(v.typ.isInstanceOf[ARRAY_] &&
+         v.asInstanceOf[ARRAY_].component_typ.isInstanceOf[T])
+          Some(v.asInstanceOf[V[A]])
+      None
+    }
   }
   
   /*

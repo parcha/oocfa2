@@ -7,8 +7,6 @@ sealed abstract class RetVal extends Immutable with NotNull with Serializable {
   def union[RV <: RetVal](other: RV) : RetVal
 }
 object RetVal {
-  //case object Unknown extends RetVal
-  
   trait WithReturn[T <: Returnable] extends RetVal { val rv: Val[T] }
   type WithReturn_ = WithReturn[_ <: Returnable]
   final case class Return [T <: Returnable] (rv:Val[T]) extends RetVal with WithReturn[T] {

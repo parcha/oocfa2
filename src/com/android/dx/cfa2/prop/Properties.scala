@@ -37,7 +37,7 @@ object Properties extends Enumeration {
     sealed trait JModifierReflectable extends Reflectable {
       final def testJMember(m) = tester(m.getModifiers())
       final def testJModifiers(mods: Int) = tester(mods)
-      protected[this] val tester: (Int => Boolean) with NotNull
+      protected[this] val tester: (Int => Boolean)
     }
     
     private[prop] def toProp(bits:Int) : Option[CSet[Property]] = byBits.get(bits)    

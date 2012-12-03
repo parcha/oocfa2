@@ -14,9 +14,6 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
   import RefType._
   require(raw isReference)
   
-  val defaultInst = NULL
-  val tmp = implicitly[NULL#Instance <:< RefType#Instance]
-  
   instance_param_[Tri]('isNull, Tri.F)
   instance_param__[Long]('heapToken, ()=>nextHeapToken)
   
@@ -171,6 +168,8 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
       if(this.klass == null || t_.klass == null) Tri.U
       else t_.klass isAssignableFrom this.klass
     }}
+  
+  final val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
   
   /*
    *  Declarative API for subclasses to define attributes.

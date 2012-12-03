@@ -241,6 +241,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     final val klass =
       if(component_typ.klass == null) null
       else component_typ.klassTag.wrap.runtimeClass
+    final val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
       
     type GetResult = Option[Entry]
     
@@ -327,13 +328,13 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
         case Known_?(i) =>
           get(i.self)
         })
-      def apply(is: Val[INT.type]) : IndexCheck[GetResult]= wrapIndexCheck(is,
-        is match {
+      def apply(vi: Val[INT.type]) : IndexCheck[GetResult]= wrapIndexCheck(vi,
+        vi match {
         case Val.Unknown(_) =>
           if(array isEmpty) NotExists
           else Some(Val.deepUnion[component_typ.type](array.seq.values))
         case _ =>
-          val poss = is map ((i: VAL[INT.type])=>apply(i).asInstanceOf[WithRet[GetResult]].ret)
+          val poss = vi.asSet map ((i: VAL[INT.type])=>apply(i).asInstanceOf[WithRet[GetResult]].ret)
           if(poss contains None) None
           else Some(Val.deepUnion[component_typ.type](poss map (_.get)))
         })
@@ -416,8 +417,8 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
   sealed abstract class IndexCheck[+R]
   object IndexCheck {
     sealed abstract class WithRet[R](val ret:R) extends IndexCheck[R]
-    final case class Within[R](ret:R) extends WithRet[R](ret)
-    final case class Maybe[R](ret:R) extends WithRet[R](ret)
+    final case class Within[R](override val ret:R) extends WithRet[R](ret)
+    final case class Maybe[R](override val ret:R) extends WithRet[R](ret)
     final case object Outside extends IndexCheck[Nothing]
   }
 }
@@ -425,6 +426,8 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
 /** This is just a really weird type */
 object RETADDR extends Instantiable(RawType.RETURN_ADDRESS) {
   val klass = null
+  // Actually invalid
+  val defaultInst = constructor(null, Val.Top)
   val constructor = new Instance(_, _)
   protected final class Instance_ (params: IParams, deps: Val_) extends super.Instance_(params, deps)
   type Instance = Instance_

@@ -14,8 +14,14 @@ import java.lang.reflect.{Method => JMethod}
 
 sealed trait MethodDesc extends Immutable with NotNull {
   def name: String
-  def id: ID
   val parent: ClassDesc
+  final lazy val id = {
+    val pname = parent.typ.toHuman
+    IDParsers.parse(IDParsers.meth_id, pname+"."+name) match {
+      case IDParsers.Success(id, _) => id
+      case _ => throw new RuntimeException("Failure in parsing the method descriptor for "+pname+"."+name)
+    }
+  }
   
   final def arity: Int = argTs.size
   def argTs: Seq[Instantiable]
@@ -99,13 +105,6 @@ object MethodDesc {
 
 sealed trait DalvikMethodDesc extends MethodDesc {
   final def name = nat.getName.getString
-  final lazy val id = {
-    val pname = parent.typ.toHuman
-    IDParsers.parse(IDParsers.meth_id, pname+"."+name) match {
-      case IDParsers.Success(id, _) => id
-      case _ => throw new RuntimeException("Failure in parsing the method descriptor for "+pname+"."+name)
-    }
-  }
   
   def prototype: dx.rop.`type`.Prototype
   final lazy val argTs =
@@ -168,7 +167,7 @@ object Method extends Cacher[(Raw, RopMethod), Method] {
 
 final case class GhostMethod private (val spec:MethodSpec) extends DalvikMethodDesc {
   def prototype = spec.getPrototype
-  def parent = GhostClass(spec.getDefiningClass)
+  val parent = GhostClass(spec.getDefiningClass)
   def nat = spec.getNat
 }
 object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
@@ -178,6 +177,7 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
 }
 
 final case class ReflMethod private (private val refl: JMethod) extends MethodDesc {
+  def name = refl.getName
   val parent = ReflClass(refl.getDeclaringClass())
   
   def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]

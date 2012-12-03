@@ -21,10 +21,10 @@ object ClassDesc {
 
 sealed trait DalvikClassDesc extends ClassDesc {
   val spec: CstType
-  final def typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
+  final val typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
 }
 
-final case class Class(raw: RawClass) extends ClassDesc {
+final case class Class(raw: RawClass) extends DalvikClassDesc {
   val spec = raw.getThisClass
   lazy val props = prop.Range(prop.Domain.Class, raw.getAccessFlags)
   def is(prop: Property*) = props contains(prop:_*)
@@ -36,7 +36,7 @@ object Class {
   implicit def unwrap(c:Class) = c.raw
 }
 
-final case class GhostClass(spec: CstType) extends ClassDesc {
+final case class GhostClass(spec: CstType) extends DalvikClassDesc {
   val isFinal = typ.klass match {
     case null  => Tri.U
     case klass => Tri.lift(java.lang.reflect.Modifier.isFinal(klass.getModifiers()))
@@ -50,5 +50,5 @@ object GhostClass {
 import java.lang.{Class => JClass}
 final /*implicit*/ case class ReflClass(refl: JClass[_]) extends ClassDesc {
   val typ = Type(refl).asInstanceOf[Instantiable]
-  val isFinal = Final.testJModifiers(refl.getModifiers())
+  val isFinal: Tri = Final.testJModifiers(refl.getModifiers())
 }

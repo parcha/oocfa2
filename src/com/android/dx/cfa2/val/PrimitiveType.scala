@@ -13,7 +13,6 @@ sealed trait PrimitiveType extends Instantiable {
 
 object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton {
   val klass = null
-  val defaultInst = null
   override lazy val singleton = Instance_
   protected[this] object Instance_ extends super.Instance_(paramify(), Val.Bottom)
   type Instance = Instance_
@@ -31,14 +30,14 @@ extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBePa
     }
   }
   /** Subclasses should override this partial function if they want to cache certain values */
-  protected[this] val cacheHook: PartialFunction[V, Instance] = null
+  protected[this] def cacheHook(self:V): Instance = throw new MatchError
   /** Subclasses should override if they want to cache certain values, even with deps */
   protected[this] def cacheHook(self:V, deps: Val_) : Option[Instance] =
     if(deps != Val.Bottom) None // Only cache fresh values
     else if(self == default) Some(defaultInst) // Always "cache" the default value
-    else if(cacheHook != null) (cacheHook.lift)(self)
-    else None
-    
+    else try { Some(cacheHook(self)) }
+         catch { case e:MatchError => None }
+         
   protected[this] final val constructor = new Instance(_, _)
   protected[this] final class Instance_(params: IParams, deps:Val_)
   extends super[PrimitiveType].Instance_(params, deps) with super[Reflected].Instance_
@@ -51,7 +50,7 @@ object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
   protected def false_(deps: Val_) = instance(false, deps)
   val TRUE  = true_(Val.Bottom)
   val FALSE = defaultInst
-  override protected[this] def cacheHook = {
+  override protected[this] def cacheHook(self) = self match {
     case true  => TRUE
     case false => FALSE
   }
@@ -87,7 +86,7 @@ object INT extends ValuedType[Int](RawType.INT) with Type.Integral {
   val ZERO = defaultInst
   val ONE  = instance(1, Val.Bottom)
   val NEG_ONE = instance(-1, Val.Bottom)
-  override protected[this] def cacheHook = {
+  override protected[this] def cacheHook(self) = self match {
     case 0  => ZERO
     case 1  => ONE
     case -1 => NEG_ONE

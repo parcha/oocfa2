@@ -642,7 +642,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       assert(p != null); p.get
     }
     @inline def update_pseudo(p: Val_) = {
-      assert(!(p exists {_.typ == VOID}))
+      assert(!(p satisfies {_.typ == VOID}))
       eval_state = eval_state.update(pseudo_ = Some(p))
     }
     
@@ -803,7 +803,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   npe = true
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; it'll handle indexing properly
-                case Subtype_?(arr: INST[A]) =>
+                case ARRAY_?(arr: INST[A]) =>
                   if(+arr.isNull) npe = true
                   arr.~[resultT.type](get_)
               }
@@ -832,8 +832,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               result = varray eval_ get
             case APUT =>
               val entry = operands(0)
-              type Entry = T forSome { type T <: Instantiable }
-              type A = ARRAY[Entry]
+              type A = ARRAY[_]
               val varray = operands(1).asInstanceOf[Val[A]]
               val index = operands(2).asInstanceOf[Val[INT.type]]
               var npe = false
@@ -845,7 +844,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   npe = true
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; since we're putting, it doesn't matter
-                case Subtype_?(arr: INST[A]) =>
+                case ARRAY_?(arr: INST[A]) =>
                   if(+arr.isNull) npe = true
                   Val.Bottom//arr.~[A](put_)
               }
@@ -935,7 +934,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           val typ = Type(cst.asInstanceOf[CstType].getClassType()).asInstanceOf[RefType]
           code match {
             case CHECK_CAST =>
-              val sat = obj map {_.isValueOf(typ)}
+              val sat = obj.asSet map {_.isValueOf(typ)}
               if(!Tri._all(sat))
                 uncaught += Exceptionals.CLASS_CAST
               // TODO: How do we lift the cast knowledge?
