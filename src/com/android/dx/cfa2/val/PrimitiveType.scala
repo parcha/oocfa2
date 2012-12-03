@@ -21,11 +21,11 @@ object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton
 sealed abstract class ValuedType[V <: AnyVal] protected[`val`] (raw:RawType)(implicit val EigenType_ : ClassTag[V])
 extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBeParam {
   protected[this] val default: V
-  val defaultInst = instance(Val.Bottom, paramify(('self, default)))
+  lazy val defaultInst = constructor(paramify(('self, default)), Val.Bottom)
   final override def instance(deps: Val_, params: IParams) = {
     require(params contains 'self, params.size==1)
     cacheHook(params('self).asInstanceOf[V], deps) match {
-      case None        => constructor(params, deps)
+      case None        => super.instance(deps, params)
       case Some(cache) => cache 
     }
   }
@@ -49,7 +49,7 @@ object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
   protected def true_(deps: Val_) = instance(true, deps)
   protected def false_(deps: Val_) = instance(false, deps)
   val TRUE  = true_(Val.Bottom)
-  val FALSE = defaultInst
+  lazy val FALSE = defaultInst
   override protected[this] def cacheHook(self) = self match {
     case true  => TRUE
     case false => FALSE
@@ -60,13 +60,13 @@ object BYTE extends ValuedType[Byte](RawType.BYTE) with Type.Integral {
   //protected val _V = manifest[Byte]
   protected[this] val default = 0.toByte
   implicit val lifter = scala.Numeric.ByteIsIntegral
-  val ZERO = defaultInst
+  lazy val ZERO = defaultInst
 }
 object CHAR extends ValuedType[Char](RawType.CHAR) with Type.Integral {
   //protected val _V = manifest[Char]
   protected[this] val default = '\0'
   implicit val lifter = scala.Numeric.CharIsIntegral
-  val NUL = defaultInst
+  lazy val NUL = defaultInst
 }
 object DOUBLE extends ValuedType[Double](RawType.DOUBLE) with Type.Fractional {
   //protected val _V = manifest[Double]
@@ -83,7 +83,7 @@ object INT extends ValuedType[Int](RawType.INT) with Type.Integral {
   implicit val lifter = scala.Numeric.IntIsIntegral
   implicit def asBoolean(inst:Instance) = inst.self!=0
   protected[this] val default = 0
-  val ZERO = defaultInst
+  lazy val ZERO = defaultInst
   val ONE  = instance(1, Val.Bottom)
   val NEG_ONE = instance(-1, Val.Bottom)
   override protected[this] def cacheHook(self) = self match {
@@ -96,11 +96,11 @@ object LONG extends ValuedType[Long](RawType.LONG) with Type.Integral {
   //protected val _V = manifest[Long]
   protected[this] val default = 0L
   implicit val lifter = scala.Numeric.LongIsIntegral
-  val ZERO = defaultInst
+  lazy val ZERO = defaultInst
 }
 object SHORT extends ValuedType[Short](RawType.SHORT) with Type.Integral {
   //protected val _V = manifest[Short]
   protected[this] val default = 0.toShort
   implicit val lifter = scala.Numeric.ShortIsIntegral
-  val ZERO = defaultInst
+  lazy val ZERO = defaultInst
 }

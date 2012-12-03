@@ -20,15 +20,15 @@ object ClassDesc {
 }
 
 sealed trait DalvikClassDesc extends ClassDesc {
-  val spec: CstType
+  def spec: CstType
   final val typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
 }
 
 final case class Class(raw: RawClass) extends DalvikClassDesc {
-  val spec = raw.getThisClass
+  lazy val spec = raw.getThisClass
   lazy val props = prop.Range(prop.Domain.Class, raw.getAccessFlags)
   def is(prop: Property*) = props contains(prop:_*)
-  val isFinal = Tri.lift(is(Final))
+  val isFinal: Tri = is(Final)
   override def toString = spec.toHuman+"@"+raw.getSourceFile.getString
 }
 object Class {
@@ -37,9 +37,9 @@ object Class {
 }
 
 final case class GhostClass(spec: CstType) extends DalvikClassDesc {
-  val isFinal = typ.klass match {
+  val isFinal: Tri = typ.klass match {
     case null  => Tri.U
-    case klass => Tri.lift(java.lang.reflect.Modifier.isFinal(klass.getModifiers()))
+    case klass => Final.testJModifiers(klass.getModifiers())
   }
 }
 object GhostClass {

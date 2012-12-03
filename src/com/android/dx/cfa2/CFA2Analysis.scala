@@ -192,6 +192,7 @@ object CFA2Analysis {
   
   // Global, hackish convenience
   def log(sym:Symbol)(s:String) = singleton.opts.log(sym)(s)
+  def logs = singleton.opts.logs
 }
 
 /**
@@ -661,7 +662,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !(ins.opcode.isInstanceOf[Branches] ||
-             ins.opcode.isInstanceOf[MayEnd])) {
+             ins.opcode.isInstanceOf[MayEnd])) /*try*/ {
       log('debug) (ins toString)
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
@@ -723,7 +724,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case MOVE_EXCEPTION     => take_error match {
                 // FIXME: We couldn't track the exceptional
                 case Val.Top    => Val.Unknown(resultT)
-                case Val.Bottom => assert(false); Val.Bottom //shouldn't happen...
+                case Val.Bottom => throw new RuntimeException //shouldn't happen...
                 case e          => e
               }
             case MOVE_RESULT         => take_retval
@@ -745,7 +746,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   Val.Bottom
                 case OBJECT_?(v: VAL[OBJECT]) => v match {
                   case Known_?(v)   => v~{_.apply(slot)}
-                  case Unknown_?(v) =>
+                  case Unknown_?() =>
                     log('debug) (s"Possible null pointer exception when getting slot $slot of $v")
                     npe = true
                     val field = v.typ.fieldSlots getOrRegister spec
@@ -807,7 +808,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   npe = true
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; it'll handle indexing properly
-                case ARRAY_?(arr: INST[A]) =>
+                //case ARRAY_?(arr: INST[A]) =>
+                case arr: INST[A] =>
                   if(+arr.isNull) {
                     log('debug) (s"Possible null pointer exception when getting at $index in array $arr")
                     npe = true
@@ -852,12 +854,13 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   npe = true
                   Val.Bottom
                 // Unknown for Array is actually also an Instance; since we're putting, it doesn't matter
-                case ARRAY_?(arr: INST[A]) =>
+                //case ARRAY_?(arr: INST[ARRAY[_]]) =>
+                case arr: INST[A] =>
                   if(+arr.isNull) {
                     log('debug) (s"Possible null pointer exception when putting $entry at $index in array $arr")
                     npe = true
                   }
-                  Val.Bottom//arr.~[A](put_)
+                  arr.~[A](put_)
               }
               // FIXME: Add checking for array-storage exception
               def put_(arr:REF[A]) : Val[A] =
@@ -877,7 +880,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               if(npe) uncaught += Exceptionals.NULL_POINTER
               if(oob) uncaught += Exceptionals.ARRAY_INDEX
               val new_arr = varray eval_ put
-              // TODO
+              // TODO: Is this correct?
+              tracef = tracef +# (srcs(0), new_arr)
           }
         
         /** Monitor **/
@@ -978,7 +982,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               npe = true
               Val.Bottom
             // Unknown for Array is actually also an Instance; it'll handle indexing properly
-            case ARRAY_?(arr: INST[A]) =>
+            //case ARRAY_?(arr: INST[A]) =>
+            case arr: INST[A] =>
               if(+arr.isNull) npe = true
               arr~~(_.length)
           }
@@ -1128,23 +1133,33 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 case supIlk => supIlk
               }
             }
-            // Create equivalance classes for ilks
-            val ilks = vobj.asSet groupBy getIlk
+            if(opts.debug) {
+              // Create equivalance classes for ilks
+              val ilks = vobj.asSet groupBy getIlk
+              log('debug) (s"Resolving call with ${ilks.size} ilks: ${ilks.keys}")
+            }
+            
             // Resolve virtual methods
-            val vmeths = ilks groupBy {_ match {
-              case null => ghost
-              case (ilk, _) => mdesc.matchingOverload(ilk) match {
+            def getVMeth(obj: VAL[OBJECT]) = {
+              val ilk = getIlk(obj)
+              if(ilk == null) ghost
+              else mdesc.matchingOverload(ilk) match {
                 case None       => ghost
                 case Some(refl) => reflMethodMap get refl match {
                   case None    => ghost
-                  case Some(m) => m
+                  case Some(m) =>
+                    // The true ilk may actually be unknown, so we don't wish to risk misdirection
+                    if(obj.isUnknown && m.isFinal != Tri.T) ghost
+                    else m
                 }
               }
-            }}
+            }
+            val vmeths = vobj.asSet groupBy getVMeth
+            log('debug) (s"Resolved to ${vmeths.size} vmeths: ${vmeths.keys}")
             // Dispatch based on virtual method
             // FIXME: This CANNOT use a parallel collection unless OOCFA2 as a whole is threadsafe!
-            for((mdesc, ilks) <- vmeths.seq.toSeq.sortBy{_._1}; // Sort to give some determinism
-                vobj = Val(ilks.values reduce {_ union _}))
+            for((mdesc, objs) <- vmeths.seq.toSeq.sortBy{_._1}; // Sort to give some determinism
+                vobj = Val(objs))
               invoke_direct(mdesc, vobj)
           }
           
@@ -1187,8 +1202,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         assert(result != null)
         log('debug) ("Result: "+result)
         def dependize[T <: Instantiable](v: VAL[T]): VAL[T] = v match {
-          case Unknown_?(v) => v
-          case Known_?(v) => v.clone(cdeps)
+          case Unknown_?() => v
+          case Known_?(v)  => v.clone(cdeps)
         }
         tracef = tracef +# (sink.get, result eval dependize[Instantiable])
       }
@@ -1203,6 +1218,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           uncaught += Type(ins.operation.exceptionTypes.getType(i)).asInstanceOf[Exceptional]
       
     } // End eval
+    /*catch {
+      case e:RuntimeException if !opts.debug => throw InternalError(e, s"@ Instruction $ins")
+    }*/
     
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast

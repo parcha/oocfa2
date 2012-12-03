@@ -32,5 +32,5 @@ extends URLClassLoader(urls.toArray, parent) {
   
   protected[this] def warn(msg:String) =
     // FIXME: HACK: for now, we just pull the singleton and warn that way
-    CFA2Analysis.singleton.opts.log('warn)(msg)
+    CFA2Analysis.log('warn)(msg)
 }

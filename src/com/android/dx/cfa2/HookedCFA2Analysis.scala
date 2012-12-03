@@ -12,8 +12,8 @@ object HookedCFA2Analysis {
   }
 }
 trait HookedCFA2Analysis[+O<:HookedCFA2Analysis.Opts] extends CFA2Analysis[O] {
-  protected[cfa2] val instance_hooks = opts.instance_hooks
-  protected[cfa2] val clone_hooks = opts.clone_hooks
-  protected[this] val umethod_hooks = opts.umethod_hooks
-  protected[this] val kmethod_hooks = opts.kmethod_hooks
+  protected[cfa2] lazy val instance_hooks = opts.instance_hooks
+  protected[cfa2] lazy val clone_hooks = opts.clone_hooks
+  protected[this] lazy val umethod_hooks = opts.umethod_hooks
+  protected[this] lazy val kmethod_hooks = opts.kmethod_hooks
 }

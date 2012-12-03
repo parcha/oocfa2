@@ -55,6 +55,8 @@ package object cfa2 {
     }
   }
   
+  final case class InternalError(cause: Throwable = null, msg: String = null) extends RuntimeException(msg, cause)
+  
   /* ============= Interfacing with Java codebase ======== */
   /*import dx.rop.code.{BasicBlock=>BB}
   implicit def toBBVisitor(f: (BB, BB)=>Unit) : BB.Visitor = {

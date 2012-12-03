@@ -37,10 +37,14 @@ package object `val` {
   type Dynamic_ = Dynamic[_]
   
   // Witnesses
-  object Unknown_? {
+  // Unknown witness not useful because many Instantiables take Unknown to be an Instance; use _ isUnknown
+  /*object Unknown_? {
     def unapply[T <: Instantiable](v:VAL[T]): Option[UNKNOWN[T]] =
       if(v.isUnknown) Some(v.asInstanceOf[UNKNOWN[T]])
       else None
+  }*/
+  object Unknown_? {
+    def unapply(v:VAL_): Boolean = v.isUnknown
   }
   object Known_? {
     def unapply[T <: Instantiable](v:VAL[T]): Option[KNOWN[T]] =

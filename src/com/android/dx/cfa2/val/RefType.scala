@@ -12,7 +12,7 @@ import scala.reflect.classTag
 
 abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) with Type.CanBeParam {
   import RefType._
-  require(raw isReference)
+  //require(raw isReference)
   
   instance_param_[Tri]('isNull, Tri.F)
   instance_param__[Long]('heapToken, ()=>nextHeapToken)
@@ -165,7 +165,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
       else t_.klass isAssignableFrom this.klass
     }}
   
-  final val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
+  final lazy val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
   
   /*
    *  Declarative API for subclasses to define attributes.

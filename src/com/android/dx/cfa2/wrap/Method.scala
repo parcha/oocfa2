@@ -14,7 +14,7 @@ import java.lang.reflect.{Method => JMethod}
 
 sealed trait MethodDesc extends Immutable with NotNull {
   def name: String
-  val parent: ClassDesc
+  def parent: ClassDesc
   final lazy val id = {
     val pname = parent.typ.toHuman
     IDParsers.parse(IDParsers.meth_id, pname+"."+name) match {
@@ -34,7 +34,7 @@ sealed trait MethodDesc extends Immutable with NotNull {
   final def matchingOverload(klass: JClass[_]): Option[JMethod] = argCs match {
     case None  => None
     case Some(argCs) =>
-      val opts = CFA2Analysis.singleton.opts // For debugging
+      import CFA2Analysis.{log, logs} // For debugging
       var curr = klass
       // Recurse through the type hierarchy, searching for the method
       while(curr != null) {
@@ -43,23 +43,24 @@ sealed trait MethodDesc extends Immutable with NotNull {
           // DeclaredMethod vs. Method so that we can access private/protected
           val refl = curr.getDeclaredMethod(name, argCs:_*)
           //CFA2Analysis.singleton.opts.log('debug) ("Found as "+refl)
+          assert(refl != null)
           return Some(refl)
         }
         catch {
           case e:NoSuchMethodException =>
             curr = curr.getSuperclass()
           case e:Exception =>
-            opts.log('debug) (s"Failed to find matching overload for $name in $klass along path $curr")
-            e.printStackTrace(opts.logs('error).stream)
+            log('debug) (s"Failed to find matching overload for $name in $klass along path $curr")
+            e.printStackTrace(logs('error).stream)
             return None
           // Hack until we can get the classloader to cooperate
           case e:NoClassDefFoundError =>
-            opts.log('debug) (s"Classloader being uncooperative in reflection for $name in $klass along path $curr")
-            e.printStackTrace(opts.logs('error).stream)
+            log('debug) (s"Classloader being uncooperative in reflection for $name in $klass along path $curr")
+            e.printStackTrace(logs('error).stream)
             return None
         }
       }
-      CFA2Analysis.singleton.opts.log('debug) (s"Failed to find matching overload for $name in $klass")
+      log('debug) (s"Failed to find matching overload for $name in $klass")
       return None
   }
   
@@ -148,14 +149,14 @@ final case class Method private (val raw:Raw, val rop:RopMethod) extends DalvikM
   
   lazy val props = prop.Range(prop.Domain.Method, accessFlags)
   def is(prop: Property*) = props contains(prop:_*)
-  val parent = GhostClass(raw.getDefiningClass)
+  lazy val parent = GhostClass(raw.getDefiningClass)
   def accessFlags = raw.getAccessFlags
   // FIXME: We need to exclude the "this" so we can vary on it; also lines up with Ghost and Refl
   def prototype = raw.getEffectiveDescriptor
   def attributes(attr: String) = raw.getAttributes.findFirst(attr)
   
-  override val isIMethod = Tri.lift(!is(Static))
-  override val isFinal = Tri.lift(is(Final))
+  override val isIMethod: Tri = !is(Static)
+  override val isFinal: Tri = is(Final)
   def nat = raw.getNat
   lazy val dump = rop.dump
 }
@@ -167,7 +168,7 @@ object Method extends Cacher[(Raw, RopMethod), Method] {
 
 final case class GhostMethod private (val spec:MethodSpec) extends DalvikMethodDesc {
   def prototype = spec.getPrototype
-  val parent = GhostClass(spec.getDefiningClass)
+  lazy val parent = GhostClass(spec.getDefiningClass)
   def nat = spec.getNat
 }
 object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
@@ -178,7 +179,7 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
 
 final case class ReflMethod private (private val refl: JMethod) extends MethodDesc {
   def name = refl.getName
-  val parent = ReflClass(refl.getDeclaringClass())
+  lazy val parent = ReflClass(refl.getDeclaringClass())
   
   def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
   def retT = Type(refl.getReturnType()).asInstanceOf[Instantiable]

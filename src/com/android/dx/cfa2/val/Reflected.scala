@@ -29,7 +29,8 @@ trait Reflected[ET] extends Instantiable with DelayedInit {
   // Hack for proper initialization; really just want this one clause to be executed after
   // all other initialization phases, but without the if-statement, this would be executed
   // at every init @_@
-  def delayedInit(body) = {
+  override def delayedInit(body) = {
+  //super.delayedInit(body)
   body
   if(!isIParamRegistered('self)) {
     instance_param_[ET]('self, default, {_!=null})

@@ -13,7 +13,7 @@ import scala.reflect.ClassTag
  * Represents a type which may have run-time values of it. They should be defined
  * according to the rules set out by Type.
  */
-abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
+abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { self =>
   import Instantiable._
   
   // Open-recursion through Self at the type-level
@@ -21,15 +21,21 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   //type Self <: this.type
   final type Self = self.type
   val klass : Class[_]
-  if(klass != null)
-    register(klass, this)
-  implicit val klassTag = ClassTag(klass)
+  
+  def delayedInit(body) = {
+  body
+  if(klass != null) {
+    if(!isRegistered(klass))
+      register(klass, this)
+  }
+  //else CFA2Analysis.singleton.opts.log('warn)(s"Could not reflect type $this")
+  }
   
   /** Some "instantiables" aren't actually usable (*cough*void*cough*) **/
   val isGhost = !this.isInstanceOf[CanBeParam]
   
   /** The default value the JVM gives to uninitialized instances of this type **/
-  val defaultInst: Instance_
+  def defaultInst: Instance
   
   /**
    * Represents a value of this type. They must be referentially distinct within the
@@ -65,7 +71,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
       Tri.any(vs map dependsUpon)
       
     final def satisfies(f: Instance => Tri): Tri = this match {
-      case Unknown_?(_) => Tri.U
+      case Unknown_?() => Tri.U
       // FIXME: Why do we have to mark Instance here? Scala typechecker fail
       case Known_?(v:Instance) => f(v)
     }
@@ -178,7 +184,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   protected[this] final implicit def paramify(ps: (Symbol, Any)*) = immutable.Map(ps:_*)
   
   /** Param -> (type, default if optional, constraint checker) */
-  private[this] val iparamRegistry: mutable.Map[Symbol, IParamRegistryEntry[_<:Any]] = mutable.Map()
+  // FIXME: Should be private[this], but isIParamRegistered triggers IllegalAccessError
+  protected[this] val iparamRegistry: mutable.Map[Symbol, IParamRegistryEntry[_<:Any]] = mutable.Map()
   /** Subclasses should use this declarative API to denote the params that an instance requires */
   protected[this] final def instance_param[T]
   (sym: Symbol, checker: T=>Unit = null, converter: Any=>T=null)(implicit m: ClassManifest[T]) : Unit = {
@@ -217,7 +224,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     for((p, e) <- iparamRegistry)
       params.get(p) match {
         case None =>
-          require(e.default != None)
+          require(e.default != None, s"Default for $e of $p was None")
           build += ((p, e.genDefault_))
         case Some(v_) =>
           val v = e convert v_
@@ -228,7 +235,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     
     //FIXME: HACK
     import CFA2Analysis.singleton.instance_hooks
-    HOOK(instance_hooks, (this, deps, params), {build ++= (_:IParams)})
+    //HOOK(instance_hooks, (this, deps, params), {build ++= (_:IParams)})
         
     constructor(build.result, deps)
   }
@@ -237,11 +244,11 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   final object Array extends RefType(self.raw getArrayType) {
     final val component_typ = self
     type Entry = Val[component_typ.type]
-    private type Repr = GenMap[Int, Entry]
+    private type Repr = par.immutable.ParHashMap[Int, Entry]
     final val klass =
       if(component_typ.klass == null) null
-      else component_typ.klassTag.wrap.runtimeClass
-    final val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
+      else ClassTag(component_typ.klass).wrap.runtimeClass
+    final lazy val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
       
     type GetResult = Option[Entry]
     
@@ -250,7 +257,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
      * put together in a Val, not held by the same Instance. This way we can e.g.
      * prune impossibilities resulting from OOB exceptions.
      */
-    instance_param[VAL[INT.type]]('length)
+    instance_param_[VAL[INT.type]]('length, INT.unknown)
     instance_param_[Entry]('default, Val.Atom[component_typ.type](component_typ.defaultInst))
     
     protected[this] val constructor = new Instance(_, _)
@@ -268,18 +275,18 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
       private[this] lazy val default = param[Entry]('default)
       
       private[this] def checkIndex(i: Int): Tri = length match {
-        case Unknown_?(_) => Tri.U
+        case Unknown_?() => Tri.U
         case Known_?(l)   => i < l.self
       }
       private[this] def checkIndex(i: VAL[INT.type]): Tri = length match {
-        case Unknown_?(_) => Tri.U
+        case Unknown_?() => Tri.U
         case Known_?(l)   => i match {
-          case Unknown_?(_) => Tri.U
+          case Unknown_?() => Tri.U
           case Known_?(i)   => i.self < l.self
         }
       }
       private[this] def checkIndex(i: Val[INT.type]): Tri = length match {
-        case Unknown_?(_) => Tri.U
+        case Unknown_?() => Tri.U
         case Known_?(l)   =>
           if(i satisfies {_.isUnknown}) Tri.U
           else {
@@ -322,7 +329,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
         })
       def apply(i: VAL[INT.type]) : IndexCheck[GetResult] = wrapIndexCheck(i,
         i match {
-        case Unknown_?(_) =>
+        case Unknown_?() =>
           if(array isEmpty) NotExists
           else Some(Val.deepUnion[component_typ.type](array.seq.values))
         case Known_?(i) =>
@@ -383,8 +390,10 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
   import registry._
   private def register(c: Class[_], t: Instantiable) = registry register (c, t)
   def typeForClass(c: Class[_]): Option[Instantiable] = registry registered c
+  def isRegistered(c: Class[_]) = registry isRegistered c
   
-  private case class IParamRegistryEntry[T](
+  // FIXME: see iparamregistry
+  protected case class IParamRegistryEntry[T](
     manifest: ClassManifest[T],
     default: Option[Either[() => _<:T, T]],
     checker: T => Unit,
@@ -427,7 +436,7 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
 object RETADDR extends Instantiable(RawType.RETURN_ADDRESS) {
   val klass = null
   // Actually invalid
-  val defaultInst = constructor(null, Val.Top)
+  lazy val defaultInst = throw new UnsupportedOperationException
   val constructor = new Instance(_, _)
   protected final class Instance_ (params: IParams, deps: Val_) extends super.Instance_(params, deps)
   type Instance = Instance_
