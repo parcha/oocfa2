@@ -224,10 +224,10 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
    * ultimately be of unknown origin (and thus e.g. unpredictably alias).
    */
   // TODO: What do we do about aliasing given e.g. mutable fields?
-  final override def unknown(deps: Val_) = constructor(paramify(('unknown, true),
-                                                                ('fieldBacking, fieldUnknowns),
-                                                                ('isNull, Tri.U),
-                                                                ('monitored, Tri.U)), deps)
+  final override def unknown(deps: Val_) = instance(deps, ('unknown, true),
+                                                          ('fieldBacking, fieldUnknowns),
+                                                          ('isNull, Tri.U),
+                                                          ('monitored, Tri.U))
   
   instance_param_[FieldMap]('fields,
                             new FieldMap(),

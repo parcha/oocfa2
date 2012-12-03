@@ -263,10 +263,10 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
     protected[this] val constructor = new Instance(_, _)
     
     /** See the discussion of unknowns in OBJECT **/
-    override def unknown(deps: Val_) = constructor(paramify(('unknown, true),
-                                                            ('length, INT.unknown), // TODO: make a natural number
-                                                            ('isNull, Tri.U),
-                                                            ('monitored, Tri.U)), deps)
+    override def unknown(deps: Val_) = instance(deps, ('unknown, true),
+                                                      ('length, INT.unknown), // TODO: make a natural number
+                                                      ('isNull, Tri.U),
+                                                      ('monitored, Tri.U)).asInstanceOf[Value]
     
     protected[this] final class Instance_ (params: IParams, deps: Val_) extends super.Instance_(params, deps) { self=>
       import IndexCheck._
