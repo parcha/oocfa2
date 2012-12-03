@@ -14,16 +14,24 @@ import java.lang.reflect.{Member => JMember, Modifier => JModifier, Method => JM
  */
 object Properties extends Enumeration {
   
-    private val byBits = new MutableConcurrentMultiMap[Int, Property]
+    // TODO: Give this a more proper type
+    private lazy val byBits = {
+      val build = new MutableConcurrentMultiMap[Int, Property]
+      val map = new MutableConcurrentMultiMap[Int, Property]
+      for(v <- values) {
+        val prop = v.asInstanceOf[Property]
+        build += (prop.bitfield, prop) 
+      }
+      build
+    }
   
-    sealed class Property private[Properties] () extends Val() {
-      final val bitfield = {
-        val label = "ACC"+getClass.getSimpleName.toUpperCase
+    sealed class Property private[Properties] (name: String) extends Val(name) {
+      final lazy val bitfield = {
+        val label = "ACC_"+this.toString.toUpperCase
         Class.forName("com.android.dx.rop.code.AccessFlags").getField(label).getInt()
       }
-      byBits += (bitfield, this)
       import math._
-      final val bit = {
+      final lazy val bit = {
         val b = log(bitfield) / log(2)
         assert(b.toInt == b)
         b.toInt
@@ -67,58 +75,58 @@ object Properties extends Enumeration {
 	  builder result
     }
     
-    sealed class Access private[Properties] () extends Property
+    sealed class Access private[Properties] (name: String) extends Property(name)
     //import tlc.Algebra._
     //type _Access = UNION [Public.type]# | [Private.type]# | [Protected.type]# ^   
-    val Public = new Access() with JModifierReflectable { val tester = JModifier.isPublic _ }
-    val Private = new Access() with JModifierReflectable { val tester = JModifier.isPrivate _ }
-    val Protected = new Access() with JModifierReflectable { val tester = JModifier.isProtected _ }
+    val Public = new Access("Public") with JModifierReflectable { val tester = JModifier.isPublic _ }
+    val Private = new Access("Private") with JModifierReflectable { val tester = JModifier.isPrivate _ }
+    val Protected = new Access("Protected") with JModifierReflectable { val tester = JModifier.isProtected _ }
     
-    val Static = new Property() with JModifierReflectable { val tester = JModifier.isStatic _ }
+    val Static = new Property("Static") with JModifierReflectable { val tester = JModifier.isStatic _ }
     
-    val Final = new Property() with JModifierReflectable { val tester = JModifier.isFinal _ }
+    val Final = new Property("Final") with JModifierReflectable { val tester = JModifier.isFinal _ }
     
-    val Synchronized = new Property() with JModifierReflectable { val tester = JModifier.isSynchronized _ }
+    val Synchronized = new Property("Synchronized") with JModifierReflectable { val tester = JModifier.isSynchronized _ }
     
     // This flag is unused by Dalvik
-    val Super = new Property()
+    val Super = new Property("Super")
     
-    val Volatile = new Property() with JModifierReflectable { val tester = JModifier.isVolatile _ }
+    val Volatile = new Property("Volatile") with JModifierReflectable { val tester = JModifier.isVolatile _ }
     
-    val Bridge = new Property() with Reflectable {
+    val Bridge = new Property("Bridge") with Reflectable {
       def testJMember(m) = m match {
         case m: JMethod => m.isBridge
       }
     }
     
-    val Transient = new Property() with JModifierReflectable { val tester = JModifier.isTransient _ }
+    val Transient = new Property("Transient") with JModifierReflectable { val tester = JModifier.isTransient _ }
     
-    val Varargs = new Property() with Reflectable {
+    val Varargs = new Property("Varargs") with Reflectable {
       def testJMember(m) = m match {
         case m: JMethod => m.isVarArgs
       }
     }
     
-    val Native = new Property() with JModifierReflectable { val tester = JModifier.isNative _ }
+    val Native = new Property("Native") with JModifierReflectable { val tester = JModifier.isNative _ }
     
-    val Interface = new Property() with JModifierReflectable { val tester = JModifier.isInterface _ }
+    val Interface = new Property("Interface") with JModifierReflectable { val tester = JModifier.isInterface _ }
     
-    val Abstract = new Property() with JModifierReflectable { val tester = JModifier.isAbstract _ }
+    val Abstract = new Property("Abstract") with JModifierReflectable { val tester = JModifier.isAbstract _ }
     
-    val Strict = new Property() with JModifierReflectable { val tester = JModifier.isStrict _ }
+    val Strict = new Property("Strict") with JModifierReflectable { val tester = JModifier.isStrict _ }
     
-    val Synthetic = new Property() with Reflectable {
+    val Synthetic = new Property("Synthetic") with Reflectable {
       def testJMember(m) = m match {
         case m: JMethod => m.isSynthetic
       }
     }
     
-    val Annotation = new Property()
+    val Annotation = new Property("Annotation")
     
-    val Enum = new Property() with JModifierReflectable { val tester = JModifier.isStatic _ }
+    val Enum = new Property("Enum") with JModifierReflectable { val tester = JModifier.isStatic _ }
     
-    val Constructor = new Property()
+    val Constructor = new Property("Constructor")
     
-    val DeclaredSynchronized = new Property()
+    val DeclaredSynchronized = new Property("Declared_Synchronized")
     
 }
