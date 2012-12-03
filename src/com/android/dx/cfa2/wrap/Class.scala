@@ -6,17 +6,29 @@ import dx.rop.cst.CstType
 import dx.cfa2
 import cfa2._
 import prop.Properties._
-import `val`.Type
+import `val`._
 
 sealed trait ClassDesc extends Immutable with NotNull {
-  def spec: CstType
-  final def typ: Type = spec.getClassType
+  val typ: Instantiable
+  val isFinal: Tri
+}
+object ClassDesc {
+  implicit val strawmanComparator = new java.util.Comparator[ClassDesc] {
+    def compare(c1, c2) = c1.typ.descriptor.compareTo(c2.typ.descriptor)
+  }
+  implicit def strawmanOrdering[T <: ClassDesc] = mkCovariantOrdering[ClassDesc, T](strawmanComparator)
+}
+
+sealed trait DalvikClassDesc extends ClassDesc {
+  val spec: CstType
+  final def typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
 }
 
 final case class Class(raw: RawClass) extends ClassDesc {
-  def spec = raw.getThisClass
+  val spec = raw.getThisClass
   lazy val props = prop.Range(prop.Domain.Class, raw.getAccessFlags)
   def is(prop: Property*) = props contains(prop:_*)
+  val isFinal = Tri.lift(is(Final))
   override def toString = spec.toHuman+"@"+raw.getSourceFile.getString
 }
 object Class {
@@ -24,8 +36,19 @@ object Class {
   implicit def unwrap(c:Class) = c.raw
 }
 
-final case class GhostClass(spec: CstType) extends ClassDesc
+final case class GhostClass(spec: CstType) extends ClassDesc {
+  val isFinal = typ.klass match {
+    case null  => Tri.U
+    case klass => Tri.lift(java.lang.reflect.Modifier.isFinal(klass.getModifiers()))
+  }
+}
 object GhostClass {
   implicit def wrap(spec:CstType) = new GhostClass(spec)
   implicit def unwrap(c:Class) = c.spec
+}
+
+import java.lang.{Class => JClass}
+final /*implicit*/ case class ReflClass(refl: JClass[_]) extends ClassDesc {
+  val typ = Type(refl).asInstanceOf[Instantiable]
+  val isFinal = Final.testJModifiers(refl.getModifiers())
 }

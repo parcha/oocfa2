@@ -3,14 +3,13 @@ package com.android.dx.cfa2
 import com.android.dx
 import dx.cfa2
 import cfa2._
-import tlc._
-import Algebra._
 
 import scala.collection._
 
 package object `val` {
   
-  type ARRAY = Instantiable#Array
+  type ARRAY[T <: Instantiable] = T#Array
+  type ARRAY_ = ARRAY[Instantiable]
   
   type IParams = immutable.Map[Symbol, Any]
   
@@ -19,16 +18,17 @@ package object `val` {
   type VAL[+T <: Instantiable] = T#Value
   type VAL_ = VAL[Instantiable]
   
-  type INST[+T <: Instantiable] = T#Instance
+  type INST[T <: Instantiable] = T#Instance
   type INST_ = INST[Instantiable]
+  
+  type REF[T <: RefType] = INST[T]#Ref
   
   type SUBV[+T <: Instantiable] = V forSome {type V <: VAL[T]}
   type SUPV[-T <: Instantiable] = V forSome {type V >: VAL[T]}
   
-  type ?[+T <: Instantiable] = UNKNOWN[T]
-  type UNKNOWN[+T <: Instantiable] = T#Unknown
+  type UNKNOWN[T <: Instantiable] = T#Unknown
   type UNKNOWN_ = UNKNOWN[Instantiable]
-  type KNOWN[+T <: Instantiable] = INST[T]
+  type KNOWN[T <: Instantiable] = INST[T]
   type KNOWN_ = INST_
   
   type SUBT[T <: Type] = Sub forSome {type Sub <: T}
@@ -36,7 +36,45 @@ package object `val` {
   type Reflected_ = Reflected[_]
   type Dynamic_ = Dynamic[_]
   
+  type NULL = NULL.type
+  
+  // Witnesses
+  object Unknown_? {
+    def unapply[T <: Instantiable](v:VAL[T]): Option[UNKNOWN[T]] =
+      if(v.isUnknown) Some(v.asInstanceOf[UNKNOWN[T]])
+      else None
+  }
+  object Known_? {
+    def unapply[T <: Instantiable](v:VAL[T]): Option[KNOWN[T]] =
+      if(!v.isUnknown) Some(v.asInstanceOf[KNOWN[T]])
+      else None
+  }
+  object Null_? {
+    def unapply(v:VAL[RefType]): Boolean = v match {
+      case v if v.typ == NULL => true
+      case Known_?(v) if v.isNull == Tri.T => true
+      case _ => false
+    }
+  }
+  object NonNull_? {
+    def unapply(v:KNOWN[RefType]): Boolean =
+      if(v.isNull == Tri.F) true
+      else false
+  }
+  object Subtype_? {
+    // FIXME: somehow make this only work for built-in types; a problem given Scala doesn't do type negation
+    def unapply[T <: Instantiable, V[T] <: VAL[T]](v:V[T]): Option[V[T]] =
+      if(v.typ.isInstanceOf[T]) Some(v.asInstanceOf[V[T]])
+      else None
+  }
+  object OBJECT_? {
+    def unapply[T <: Instantiable, V[T] <: VAL[T]](v:V[T]): Option[V[OBJECT]] =
+      if(v.typ.isInstanceOf[OBJECT]) Some(v.asInstanceOf[V[OBJECT]])
+      else None
+  }
+  
   /*
+   * FIXME
    *  At the moment, we just alias this to any instantiable type because we
    *  can't just limit it to derivations of THROWABLE since when we lift a type
    *  we don't parse its descriptor to figure out if it is a THROWABLE

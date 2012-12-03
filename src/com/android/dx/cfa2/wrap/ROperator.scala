@@ -125,12 +125,12 @@ object ROpCodes extends Enumeration(1) {
     protected[this] def func_[A <: EigenArg](args:Seq[A]): EigenRet
   }
   
-  sealed trait OnObject {
+  sealed trait OnObject extends OpCode {
     // Default common case
     val objOperand : Int = 0
   }
   
-  sealed trait WithConstant { type Constant <: dx.rop.cst.TypedConstant }
+  sealed trait WithConstant extends OpCode { type Constant <: dx.rop.cst.TypedConstant }
   
   val NOP = new OpCode(0) with NoResult
   

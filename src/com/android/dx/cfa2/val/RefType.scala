@@ -14,6 +14,9 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
   import RefType._
   require(raw isReference)
   
+  val defaultInst = NULL
+  val tmp = implicitly[NULL#Instance <:< RefType#Instance]
+  
   instance_param_[Tri]('isNull, Tri.F)
   instance_param__[Long]('heapToken, ()=>nextHeapToken)
   
@@ -23,12 +26,14 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
     /** Token for keeping track of heap reference */
     final lazy val heapToken = param[Long]('heapToken)
     
+    private[this] final lazy val monitored = param[Tri]('monitored)
+    
     /** Tests for lifted referential equality */
     final def refEq(that: RefType#Instance) : Tri =
       if((this.isNull & that.isNull)==Tri.T) true
       else if((this.isNull ^ that.isNull)==Tri.T) false
-      else if(!this.isUnknown && !that.isUnknown) heapToken == that.heapToken
-      else Tri.U
+      else if(this.isUnknown || that.isUnknown) Tri.U // TODO: Use alias analysis heuristics like TBAA
+      else heapToken == that.heapToken
     
     /**
      * This encapsulates all access to the instance via a reference hook so that
@@ -40,8 +45,22 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
      * Instances of Ref_ should feature no initialization, as they are created VERY
      * often. Therefore, one should only use defs, storing more permanent vals in self.
      */
-    protected[this] class Ref_(protected[this] implicit val env: HeapEnv)
-    extends Var.RawHeap[typ.type](self.heapToken) with Immutable /*with NotNull*/ with Serializable { _:Ref =>
+    protected[this] abstract class Ref_(protected[this] implicit val env: HeapEnv)
+    extends Var.RawHeap[typ.type](self.heapToken) with Immutable with NotNull with Serializable { _:Ref =>
+      val referee = self
+      final def monitored = self.monitored
+      
+      /* Setting of emulated fields */
+      final def monitored_=(b:Boolean) = clone(('monitored, Tri.lift(b)))()
+      final def monitored_=(vb:VAL[BOOLEAN.type]) = {
+        val b =
+          if(vb.isUnknown) Tri.U
+          else if(vb.asInstanceOf[BOOLEAN.Instance].self)
+            Tri.T
+          else Tri.F
+        clone(('monitored, b))(Val.Atom(vb))
+      }
+      
       // Forwarded methods from Instantiable.Instance
       @inline
       protected[this] final def clone(_params: (Symbol, Any)*)(extraDeps: Val_ *) : Instance =
@@ -56,34 +75,34 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
     }
     type Ref <: Ref_
     /** Ref constructor; subclasses should specify their actual, final Ref */
-    protected[this] val ref : HeapEnv => Ref with NotNull
+    protected[this] val ref : HeapEnv => Ref
     // TODO: HACK
     protected lazy val rawRef = new Var.RawHeap(heapToken){}//{ type Source = Null; val src = null }
     /** "Dereference"; gets most up-to-date version(s) */
-    @inline final def unary_~(implicit env: HeapEnv) : Val[typ.type] = env.get(rawRef) match {
+    final def unary_~(implicit env: HeapEnv) : Val[typ.type] = env.get(rawRef) match {
       case None       => Val.Atom(self).asInstanceOf[Val[typ.type]]
       case Some(refs) => refs.asInstanceOf[Val[typ.type]]
     }
     /** "Dereference-and-apply" */
-    @inline final def ~[T <: Instantiable](f: Instance#Ref => Val[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
+    final def ~[T <: Instantiable](f: Instance#Ref => Val[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
       case None       => f(ref(env))
       case Some(vref) => vref.asInstanceOf[Val[typ.type]] eval_
           ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** "Dereference, apply, and collect" */
-    @inline final def ~~[T <: Instantiable](f: Instance#Ref => VAL[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
+    final def ~~[T <: Instantiable](f: Instance#Ref => VAL[T])(implicit env: HeapEnv) : Val[T] = env.get(rawRef) match {
       case None       => Val.Atom(f(ref(env)))
       case Some(vref) => vref.asInstanceOf[Val[typ.type]] eval
           ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** "Dereference, apply, and custom-collect" */
-    @inline final def ~~~[T](f: Instance#Ref => T)(implicit env: HeapEnv) : GenSet[T] = env.get(rawRef) match {
+    final def ~~~[T](f: Instance#Ref => T)(implicit env: HeapEnv) : GenSet[T] = env.get(rawRef) match {
       case None       => immutable.Set(f(ref(env)))
       case Some(vref) => vref.asInstanceOf[Val[typ.type]].asSet map
           ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** Assert that this is the newest value, so just dummy-reference it */
-    final def unary_! = ref(null)
+    private final def unary_! : Instance#Ref = ref(null)
   }
   type Instance <: Instance_
 }
@@ -128,8 +147,6 @@ object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
  * artificially subtype all the ref types.
  */
 abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
-  //lazy val Interfaces = 
-  
   final val className = descriptorMatch.group("classname").replace('/', '.')
   val klass = BuiltinAnalysisClassLoader.reflectClass(className) match {
     case None    => null
@@ -174,7 +191,7 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
   {assert(!(_methods contains spec)); _methods += spec}*/
   
   /** Catches an incoming slot, registers it if needed, and creates a default for it */
-  protected sealed abstract class FieldBacking extends immutable.Map[FieldSlot, VAL_] {
+  protected[this] sealed abstract class FieldBacking extends immutable.Map[FieldSlot, VAL_] {
     def get(slot:FieldSlot): Some[VAL_] = {
       if(!(fieldSlots contains slot)) {
         // FIXME: Apparently raw may have odd prefixes...
@@ -192,26 +209,26 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
     def -(key:FieldSlot) = throw new UnsupportedOperationException
   }
   /** Catches only unknown slots */
-  protected final object fieldDefaults extends FieldBacking {
+  protected[this] final object fieldDefaults extends FieldBacking {
     override def get(slot:FieldSlot) = fieldDefaults_.get(slot) match {
       case s:Some[VAL_] => s
       case None         => super.get(slot)
     }
   }
   // Subclass-added defaults
-  protected val fieldDefaults_ : mutable.Map[FieldSlot, VAL_] = mutable.Map()
+  protected[this] val fieldDefaults_ : mutable.Map[FieldSlot, VAL_] = mutable.Map()
   require {
     (fieldDefaults_ forall { fieldSlots contains _._1 })
   }
   
-  protected final object fieldUnknowns extends FieldBacking
+  protected[this] final object fieldUnknowns extends FieldBacking
   
   /**
-   * The reference itself is unknown, but in order to ease usage, we imply that the
-   * non-emulated fields are unknown. Notably, if one clones this instance, it
-   * will result in a value that is NOT unknown (because we've started tracking it).
+   * The reference itself is unknown, but in order to ease usage, we allow its use as
+   * an instance. This way, we can start tracking it from now on, even though it may
+   * ultimately be of unknown origin (and thus e.g. unpredictably alias).
    */
-  // TODO: What do we do about the heapToken? We could alias with existing ones...
+  // TODO: What do we do about aliasing given e.g. mutable fields?
   final override def unknown(deps: Val_) = constructor(paramify(('unknown, true),
                                                                 ('fieldBacking, fieldUnknowns),
                                                                 ('isNull, Tri.U),
@@ -230,7 +247,6 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
   extends super.Instance_(params, deps) { self:Instance =>
     private[this] final lazy val fields = param[FieldMap]('fields)
     private[this] final lazy val fieldBacking = param[FieldBacking]('fieldBacking)
-    private[this] final lazy val monitored = param[Tri]('monitored)
     
     private[this] final lazy val ifenv : IFEnv = {
       val build = IFEnv.Builder()
@@ -244,22 +260,10 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
     protected[this] class Ref_(env: HeapEnv) extends super.Ref_()(env) { _:Ref=>
     final def fields = self.fields
     final def fieldBacking = self.fieldBacking
-    final def monitored = self.monitored
     final def ifenv = self.ifenv
     
     final def clone(newFields: FieldMap) : Instance =
       clone(('fields, fields ++# newFields))()
-    
-    /* Setting of emulated fields */
-    final def monitored_=(b:Boolean) = clone(('monitored, Tri.lift(b)))()
-    final def monitored_=(vb:VAL[BOOLEAN.type]) = {
-      val b =
-        if(vb.isUnknown) Tri.U
-        else if(vb.asInstanceOf[BOOLEAN.Instance].self)
-          Tri.T
-        else Tri.F
-      clone(('monitored, b))(Val.Atom(vb))
-    }
     
     /** Invocation of a method */
     //final def \ ()
@@ -282,6 +286,6 @@ abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
   type Instance <: Instance_
 }
 object OBJECT {
-  private val classRegistry = new MutableConcurrentMap[Class[_], Object]
-  def typeForClass(c: Class[_]): Option[Object] = classRegistry get c
+  private val classRegistry = new MutableConcurrentMap[Class[_], OBJECT]
+  def typeForClass(c: Class[_]): Option[OBJECT] = classRegistry get c
 }

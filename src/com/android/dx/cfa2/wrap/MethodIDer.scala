@@ -56,11 +56,6 @@ object MethodIDer {
   }
   object LaxlyBySignature { def apply(s:String) = new LaxlyBySignature(s) }
   
-  final case class ByPrototype(id: ID, proto: Prototype) extends Unique {
-    def identifies(m: MethodDesc) = m.id == id &&
-                                    m.prototype == proto
-  }
-  
   // Combinators
   private case class &(iders: Iterable[MethodIDer]) extends MethodIDer {
     def identifies(m) = Tri.all(iders map {_ identifies m})

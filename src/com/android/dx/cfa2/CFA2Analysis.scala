@@ -10,8 +10,6 @@ import ROpCodes.{Val => _, _}
 import Method._
 import CFA2Analysis._
 import Logger._
-import tlc.Algebra._
-import tlc.BOOL._
 import env._
 import `var`._
 import `val`._
@@ -28,6 +26,7 @@ import actors.Actor.actor
 import scala.actors.Futures._
 import scala.annotation.unchecked.uncheckedStable
 import java.io.File
+import java.lang.reflect.{Method => JMethod}
 
 object CFA2Analysis {
   
@@ -101,25 +100,25 @@ object CFA2Analysis {
     final class Builder[E] extends mutable.Builder[E, Tracer[E]] {
       protected val builder = new immutable.VectorBuilder[E]()
       def += (e: E) = { builder += e; this }
-      def clear = { builder; this }
+      def clear = builder.clear
       def result = new Tracer[E](builder.result)
     }
   }
   
   type BBTracer = Tracer[BB]
-  final case class BBEffect(static_env_out: StaticEnv,
+  final case class BBEffect(static_env_out: SFEnv,
                             tracef_out: TraceFrame,
                             heap_out: HeapEnv,
                             uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
   type BBEffects = MutableConcurrentMap[BB, MutableConcurrentMap[BBTracer, BBEffect]]
   
   type FTracer = Tracer[Method]
-  final case class FEffect(static_env_out: StaticEnv,
+  final case class FEffect(static_env_out: SFEnv,
                            heap_out: HeapEnv) extends Immutable with NotNull
   type FEffects = MutableConcurrentMap[Method, MutableConcurrentMap[FTracer, FEffect]]
   
   // TODO: Let's migrate to a proper database at some point...
-  final case class FIndex(static_env: StaticEnv,
+  final case class FIndex(static_env: SFEnv,
                           heap: HeapEnv,
                           params: Seq[Val[SUBT[Instantiable]]]) extends Immutable
   final case class FSummary(uncaught_throws: MutableConcurrentMultiMap[EncodedTrace, Exceptional],
@@ -148,7 +147,7 @@ object CFA2Analysis {
   final case class BBTrace(bb: BB,
                           tracer : BBTracer,
                           _eval_state: BBEvalState,
-                          _static_env: StaticEnv, _tracef: TraceFrame) extends Immutable with NotNull
+                          _static_env: SFEnv, _tracef: TraceFrame) extends Immutable with NotNull
   
   /**
    * 4-phase, infinitely-tiered tracing so that we can shallowly
@@ -274,10 +273,22 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     }
     for(c <- contexts)
       // Sort to give some determinism
-      for(raw <- c.dataMap.keySet.iterator.toSeq.sortBy(_.getName.getString)) {
-        val m = Method.wrap(raw, c.dataMap.get(raw).ropMeth)
+      for((raw, data) <- c.dataMap.toSeq.sortBy(_._1.getName.getString)) {
+        val m = Method.wrap(raw, data.ropMeth)
         require(!(build contains m))
         build += ((m, c))
+      }
+    build result
+  }
+  protected[cfa2] final val reflMethodMap = {
+    val build = {
+      type Builder = mutable.MapBuilder[JMethod, Method, par.immutable.ParMap[JMethod, Method]]
+      new Builder(par.immutable.ParMap())
+    }
+    for(m <- methodMap.keys)
+      m.reflection match {
+        case Some(refl) => build += ((refl, m))
+        case None => // Do nothing
       }
     build result
   }
@@ -418,7 +429,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   protected[this] val feffects = new FEffects
   @inline
   protected[this] final def faffect(m: Method, trace: FTracer,
-                                    static_env_out: StaticEnv,
+                                    static_env_out: SFEnv,
                                     heap_out: HeapEnv) = {
     if(!feffects.contains(m))
       feffects += ((m, new MutableConcurrentMap))
@@ -500,7 +511,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   def trace(meth: Method,
             mtracer: FTracer,
             mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
-            _static_env: StaticEnv,
+            _static_env: SFEnv,
             _heap: HeapEnv,
             params: Val[SUBT[Instantiable]]*)
             (implicit cdeps: Val_): FSummary = {
@@ -566,7 +577,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     val bbeffects = new BBEffects()
     @inline
     def bbaffect(bb: BB, trace: BBTracer,
-                 static_env_out: StaticEnv,
+                 static_env_out: SFEnv,
                  tracef_out: TraceFrame,
                  heap_out: HeapEnv,
                  uncaught_out: immutable.Set[Exceptional]) {
@@ -582,7 +593,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   def trace_bb(bb: BB,
                _bbtracer : BBTracer, _uncaught : immutable.Set[Exceptional],
                _eval_state: BBEvalState,
-               _static_env: StaticEnv, _tracef: TraceFrame, _heap: HeapEnv)
+               _static_env: SFEnv, _tracef: TraceFrame, _heap: HeapEnv)
               (implicit cdeps: Val_): /*TailRec[*/Unit/*]*/ = {
     log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
     
@@ -692,7 +703,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       
       lazy val obj = ins.opcode match {
         case code:OnObject => {
-          val o = operands(code.objOperand).asInstanceOf[Val[OBJECT]]
+          val o = operands(code.objOperand).asInstanceOf[Val[RefType]]
           assert(o != null); o
         }
       }
@@ -725,16 +736,23 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           result = code match {
             case GET_FIELD =>
               val slot = liftIField(spec)
-              def get_field(v:VAL[OBJECT]) : Val_ = v match {
-                case v: OBJECT#Instance => v~(_.apply(slot))
-                case v: ?[OBJECT]       =>
-                  val field = v.typ.fieldSlots get(spec) match {
-                    case Some(s) => s
-                    case None    => {v.typ.fieldSlots += slot; slot}
-                  }
-                  Val.Unknown(field.typ)
+              var npe = false
+              def get_field(v:VAL[RefType]) : Val_ = v match {
+                case Null_?() =>
+                  // FIXME: Propagate NPE
+                  log('warn) (s"Found null pointer exception when getting slot $slot of $v")
+                  npe = true
+                  Val.Bottom
+                case OBJECT_?(v: VAL[OBJECT]) => v match {
+                  case Known_?(v)   => v~{_.apply(slot)}
+                  case Unknown_?(v) =>
+                    npe = true
+                    val field = v.typ.fieldSlots getOrRegister spec
+                    Val.Unknown(field.typ)
+                }
               }
-              obj eval_ get_field _
+              if(npe) uncaught += Exceptionals.NULL_POINTER
+              obj eval_ get_field
             case GET_STATIC =>
               val slot = liftSField(spec)
               static_env getOrElse (slot, Val.Unknown(slot.typ))
@@ -743,35 +761,111 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         /** Putters **/
         case code:Putter =>
           val spec = cst.asInstanceOf[FieldSpec]
-          val put = operands(0)
+          val field = operands(0)
           code match {
             // TODO
             case PUT_FIELD =>
               val slot = liftIField(spec)
-              val new_obj = obj eval_ ((v:VAL[OBJECT]) =>
-                // Unknown for Object is actually also an Instance
-                v.asInstanceOf[OBJECT#Instance] ~~ (_.apply(slot, put)))
+              var npe = false
+              def put_field(v:VAL[RefType]) : Val[OBJECT] = v match {
+                case Null_?() =>
+                  // FIXME: What if we are guaranteed an NPE?
+                  log('warn) (s"Found null pointer exception when putting field $field in $slot of $v")
+                  npe = true
+                  Val.Bottom
+                // Unknown for Object is actually also an Instance; since we're putting, it doesn't matter
+                case OBJECT_?(v: INST[OBJECT]) =>
+                  if(+v.isNull) npe = true
+                  v ~~ (_.apply(slot, field))
+              }
+              if(npe) uncaught += Exceptionals.NULL_POINTER
+              val new_obj = obj eval_ put_field
               tracef = tracef +# (srcs(1), new_obj)
             case PUT_STATIC =>
               val slot = liftSField(spec)
-              static_env = static_env +# (new Var.MStaticF(spec), put)
+              static_env = static_env +# (new Var.MStaticF(spec), field)
           }
         
         /** Array ops **/
         case code:ArrayOp =>
-          val varray = operands(0).asInstanceOf[Val[ARRAY]]
-          val index = operands(1).asInstanceOf[Val[INT.type]]
+          import Instantiable.IndexCheck._
           code match {
-            case AGET => result = varray eval_ ((arr:VAL[ARRAY]) =>
-              if(arr.isUnknown) Val.Unknown(resultT) // TODO
-              else {
-                arr.asInstanceOf[ARRAY#Instance] ~ (_.apply(index) match {
-                  case None    => Val.Unknown(resultT) // TODO
+            case AGET =>
+              type A = ARRAY[resultT.type]
+              val varray = operands(0).asInstanceOf[Val[A]]
+              val index = operands(1).asInstanceOf[Val[INT.type]]
+              var npe = false
+              var oob = false
+              def get(arr:VAL[A]) : Val[resultT.type] = arr match {
+                case Null_?() =>
+                  // FIXME: What if we are guaranteed an NPE?
+                  log('warn) (s"Found null pointer exception when getting at $index in array $arr")
+                  npe = true
+                  Val.Bottom
+                // Unknown for Array is actually also an Instance; it'll handle indexing properly
+                case Subtype_?(arr: INST[A]) =>
+                  if(+arr.isNull) npe = true
+                  arr.~[resultT.type](get_)
+              }
+              // Actually returns Val[arr.referee.typ.component_typ.type], but Scala can't convert that function to a value
+              def get_ (arr:REF[A]): Val[resultT.type] = {
+                def get__ (res: A#GetResult): arr.referee.typ.Entry = res match {
+                  // FIXME: Workaround for broken polymorphic self-types (namely in Instantiable)
+                  case None    => Val.Unknown(arr.referee.typ.component_typ).asInstanceOf[arr.referee.typ.Entry]
                   case Some(v) => v
-                })
-              })
+                }
+                arr(index) match {
+                case Within(res) =>
+                  get__(res).asInstanceOf[Val[resultT.type]]
+                case Maybe(res) =>
+                  oob = true
+                  get__(res).asInstanceOf[Val[resultT.type]]
+                case Outside =>
+                  // FIXME: What if we are guaranteed an OOB?
+                  log('warn) (s"Found array-index-out-of-bounds exception when getting at $index in array $arr")
+                  oob = true
+                  Val.Bottom
+                }
+              }
+              if(npe) uncaught += Exceptionals.NULL_POINTER
+              if(oob) uncaught += Exceptionals.ARRAY_INDEX
+              result = varray eval_ get
             case APUT =>
-              val put = operands(0)
+              val entry = operands(0)
+              type Entry = T forSome { type T <: Instantiable }
+              type A = ARRAY[Entry]
+              val varray = operands(1).asInstanceOf[Val[A]]
+              val index = operands(2).asInstanceOf[Val[INT.type]]
+              var npe = false
+              var oob = false
+              def put(arr:VAL[A]) : Val[A] = arr match {
+                case Null_?() =>
+                  // FIXME: What if we are guaranteed an NPE?
+                  log('warn) (s"Found null pointer exception when putting $entry at $index in array $arr")
+                  npe = true
+                  Val.Bottom
+                // Unknown for Array is actually also an Instance; since we're putting, it doesn't matter
+                case Subtype_?(arr: INST[A]) =>
+                  if(+arr.isNull) npe = true
+                  Val.Bottom//arr.~[A](put_)
+              }
+              // FIXME: Add checking for array-storage exception
+              def put_(arr:REF[A]) : Val[A] =
+                arr(index, entry.asInstanceOf[arr.referee.typ.Entry]) match {
+                case Within(new_arr) =>
+                  Val.Atom(new_arr).asInstanceOf[Val[A]]
+                case Maybe(new_arr) =>
+                  oob = true
+                  Val.Atom(new_arr).asInstanceOf[Val[A]]
+                case Outside =>
+                  // FIXME: What if we are guaranteed an OOB?
+                  log('warn) (s"Found array-index-out-of-bounds exception when putting $entry at $index in array $arr")
+                  oob = true
+                  Val.Bottom
+              }
+              if(npe) uncaught += Exceptionals.NULL_POINTER
+              if(oob) uncaught += Exceptionals.ARRAY_INDEX
+              val new_arr = varray eval_ put
               // TODO
           }
         
@@ -782,9 +876,20 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case MONITOR_ENTER => true
             case MONITOR_EXIT  => false
           }
-          val new_obj = obj eval_ ((v:VAL[OBJECT]) =>
+          var npe = false
+          def set_monitored(v:VAL[RefType]) : Val[OBJECT] = Val.Bottom/*v match {
+            /*case Null_?() =>
+              // FIXME: What if we are guaranteed an NPE?
+              log('warn) ("Found null pointer exception when changing monitor on"+v)
+              npe = true
+              Val.Bottom*/
             // Unknown for Object is actually also an Instance
-            v.asInstanceOf[OBJECT#Instance] ~~ (_.monitored_=(monitored)))
+            case OBJECT_?(v: INST[OBJECT]) =>
+              if(+v.isNull) npe = true
+              v ~~ (_.monitored = monitored)
+          }*/
+          if(npe) uncaught += Exceptionals.NULL_POINTER
+          val new_obj = obj eval_ set_monitored
           tracef = tracef +# (srcs(0), new_obj)
         
         /** Allocation **/
@@ -793,8 +898,26 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           result = code match {
             case NEW_INSTANCE     => Val.Atom(typ.instance())
             case NEW_ARRAY        => {
-              val atyp = typ.asInstanceOf[Instantiable#Array]
-              Val.Atom(atyp.instance(Val.Bottom, ('length, operands(0))))
+              /*val atyp = typ.asInstanceOf[ARRAY_]
+              val len = operands(0).asInstanceOf[Val[INT.type]]
+              var neg_len = false
+              val varray: GenSet[Val[ARRAY_]] =
+                for(vl <- len.asSet)
+                  yield vl satisfies {(i:INST[INT.type])=> i.self >= 0} match {
+                    case Tri.T =>
+                      Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
+                    case Tri.U =>
+                      neg_len = true
+                      Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
+                    case Tri.F =>
+                      // FIXME: What if we are guaranteed a NAS?
+                      log('warn) (s"Found negative array size exception when allocating new array of size $len")
+                      neg_len = true
+                      Val.Bottom
+                  }
+              if(neg_len) uncaught += Exceptionals.NEGATIVE_ARRAY_SIZE
+              varray reduce Val.union[ARRAY_, ARRAY_, ARRAY_]*/
+              Val.Bottom
             }
             // TODO
             case FILLED_NEW_ARRAY => {
@@ -804,7 +927,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                            cst+"\n"+
                            srcs)
               throw new UnimplementedOperationException("FILLED_NEW_ARRAY")
-              Val.Unknown(resultT)
             }
           }
         
@@ -832,10 +954,23 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         case CONST => result = liftConstant(cst)
         
         case ARRAY_LENGTH => result = {
-          val varray = operands(0).asInstanceOf[Val[Instantiable#Array]]
-          varray eval_ ((arr:VAL[Instantiable#Array]) =>
-            if(arr.isUnknown) Val.Unknown(INT)
-            else arr.asInstanceOf[Instantiable#Array#Instance]~(_.length))
+          type A = ARRAY[T] forSome {type T <: Instantiable}
+          val varray = operands(0).asInstanceOf[Val[A]]
+          var npe = false
+          def len(arr:VAL[A]): Val[INT.type] = Val.Bottom/*arr match {
+            /*case Null_?() =>
+              // FIXME: What if we are guaranteed an NPE?
+              log('debug) ("Found null pointer exception when getting length of array "+arr)
+              npe = true
+              Val.Bottom*/
+            // Unknown for Array is actually also an Instance; it'll handle indexing properly
+            case Subtype_?(arr: INST[A]) =>
+              if(+arr.isNull) npe = true
+              //arr~~(_.length)
+              Val.Bottom
+          }*/
+          if(npe) uncaught += Exceptionals.NULL_POINTER
+          varray eval_ len
         }
         
         // TODO
@@ -849,34 +984,41 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         
         /** Calls **/
         case code:Call =>
-          val (mdesc, known) = {
-            val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
+          val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
+          lazy val ghost = GhostMethod.wrap(spec)
+          val mdesc =
             methodForSpec(spec) match {
-              case None    => (GhostMethod.wrap(spec), false)
-              case Some(m) => (m, true)
+              case None    => ghost
+              case Some(m) => m
             }
-          }
           
           // TODO: We may be able to look up the method if it's reflected
           // FIXME: What if it returns void?
           @inline
-          def call() =
-            if(known) call_known()
-            else      call_unknown()
+          def call(mdesc: MethodDesc) = mdesc match {
+            case m: GhostMethod => call_unknown(m)
+            case m: Method      => call_known(m)
+          }
           
           @inline
-          def call_unknown() = {
+          def call_unknown(mdesc: MethodDesc) = {
             log('debug) ("Call unknown: "+mdesc)
             val params = mkparams(operands).toSeq
             val hookRets = (umethod_hooks map (_(mdesc, params))).flatten
             val result =
               if(hookRets isEmpty) Val.Unknown(mdesc.retT)
               else hookRets reduce (_ union _)
-            eval_summary_(immutable.Set(THROWABLE),
+            val uncaught: Set[Exceptional] = mdesc.reflection match {
+              case None => immutable.Set(THROWABLE)
+              case Some(refl) => immutable.Set(
+                (for(klass <- refl.getExceptionTypes())
+                  yield Type(klass).asInstanceOf[Exceptional]):_*)
+            }
+            eval_summary_(uncaught,
                           immutable.Set(RetVal.Return(result)))
           }
           @inline
-          def call_known() = {
+          def call_known(m: Method) = {
             val m = mdesc.asInstanceOf[Method]
             log('debug) ("Call known: "+m)
             val params = mkparams(operands).toSeq
@@ -888,7 +1030,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 // TODO: actually refine this to use the propagated unknowns
                 // though it may be the case that we eventually reach a fixed-point
                 // of induced unknowns via summarization...
-                call_unknown
+                call_unknown(m)
               case _ =>
                 try {
                   var sum = trace(m, mtracer, mtracePhases, static_env, heap, params:_*)
@@ -901,7 +1043,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             	                 "Consider increasing the JVM's stack size with -Xss#")
             	    if(!opts.continueOnOverflow) throw e
             	    else e.printStackTrace(opts.logs('warn).stream)
-            	    call_unknown
+            	    call_unknown(m)
                 }
             }
           }
@@ -949,39 +1091,80 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             }
           }
           
-          code match {
-            case INVOKE_STATIC => {
-              if(Dynamic.isLiftableStaticCall(mdesc, operands:_*)) {
-                log('debug) ("Lifting static call to "+mdesc)
-                update_retval(Dynamic.liftStaticCall(mdesc, operands:_*))
-              }
-              else call()
+          @inline
+          def invoke_static() =
+            if(Dynamic.isLiftableStaticCall(mdesc, operands:_*)) {
+              log('debug) ("Lifting static call to "+mdesc)
+              update_retval(Dynamic.liftStaticCall(mdesc, operands:_*))
             }
-            // FIXME: INVOKE_SUPER needs to actually call the super-method
-            case _ => {
-              val typ = mdesc.parent.typ.asInstanceOf[OBJECT]
-              val vobj = operands.head.asInstanceOf[Val[typ.type]]
-              // TODO: Since the verifier has run, it must be true that all types of vobj are subtypes of typ;
-              // We could perhaps harness this information...
-              //assert(vobj.asSet forall (_.typ < typ == Tri.T))
-              val proto = mdesc.prototype.withFirstParameter(typ.raw)
-              
-              // Can we dynamically lift this method?
-              if(Dynamic.isLiftableCall(mdesc, vobj, operands.tail:_*)) {
-                log('debug) ("Lifting instance call to "+mdesc)
-                val typ_ = typ.asInstanceOf[typ.type with Dynamic[_]]
-                val vargs = operands.tail.asInstanceOf[Seq[Val[`val`.Reflected[_]]]]
-                @inline
-                def call_dynamic(obj: typ_.Instance) = {
-                  // TODO: catch exceptions and register them
-                  def f(ref: typ_.Instance#Ref) = (ref\mdesc)(vargs:_*)
-                  obj~f
+            else call(mdesc)
+          @inline
+          def invoke_virtual() = invoke_dispatch(false)
+          @inline
+          def invoke_super() = invoke_dispatch(true)
+          
+          @inline
+          def invoke_dispatch(sup: Boolean) = {
+            val vobj = operands.head.asInstanceOf[Val[OBJECT]]
+            def getIlk(obj: VAL[OBJECT]) = {
+              val ilk = obj.typ.klass
+              if(ilk == null) null
+              else if(!sup) ilk
+              else ilk.getSuperclass() match {
+                case null   => ilk // Already at the top
+                case supIlk => supIlk
+              }
+            }
+            // Create equivalance classes for ilks
+            val ilks = vobj.asSet groupBy getIlk
+            // Resolve virtual methods
+            val vmeths = ilks groupBy {_ match {
+              case null => ghost
+              case (ilk, _) => mdesc.matchingOverload(ilk) match {
+                case None       => ghost
+                case Some(refl) => reflMethodMap get refl match {
+                  case None    => ghost
+                  case Some(m) => m
                 }
-                val ret = vobj eval_ ((obj:VAL[OBJECT]) => call_dynamic(obj.asInstanceOf[typ_.Instance]))
-                update_retval(ret)
               }
-              else call()
+            }}
+            // Dispatch based on virtual method
+            // FIXME: This CANNOT use a parallel collection unless OOCFA2 as a whole is threadsafe!
+            for((mdesc, ilks) <- vmeths.seq.toSeq.sortBy{_._1}; // Sort to give some determinism
+                vobj = Val(ilks.values reduce {_ union _}))
+              invoke_direct(mdesc, vobj)
+          }
+          
+          @inline
+          def invoke_direct(mdesc: MethodDesc, _vobj: Val[OBJECT]) = {
+            val typ = mdesc.parent.typ.asInstanceOf[OBJECT]
+            val vobj = _vobj.asInstanceOf[Val[typ.type]]
+            // TODO: Since the verifier has run, it must be true that all types of vobj are subtypes of typ;
+            // We could perhaps harness this information...
+            //assert(vobj.asSet forall (_.typ < typ == Tri.T))
+            
+            // Can we dynamically lift this method?
+            if(Dynamic.isLiftableCall(mdesc, vobj, operands.tail:_*)) {
+              log('debug) ("Lifting instance call to "+mdesc)
+              val typ_ = typ.asInstanceOf[typ.type with Dynamic[_]]
+              val vargs = operands.tail.asInstanceOf[Seq[Val[`val`.Reflected[_]]]]
+              @inline
+              def call_dynamic(obj: typ_.Instance) = {
+                // TODO: catch exceptions and register them
+                def f(ref: typ_.Instance#Ref) = (ref\mdesc)(vargs:_*)
+                obj~f
+              }
+              val ret = vobj eval_ ((obj:VAL[OBJECT]) => call_dynamic(obj.asInstanceOf[typ_.Instance]))
+              update_retval(ret)
             }
+            else call(mdesc)
+          }
+          
+          code match {
+            case INVOKE_STATIC => invoke_static()
+            case INVOKE_VIRTUAL | INVOKE_DIRECT | INVOKE_INTERFACE =>
+              invoke_virtual()
+            case INVOKE_SUPER => invoke_super()
           }
           // End invoke-handling
       } // End instruction matching
@@ -991,11 +1174,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         assert(result != null)
         log('debug) ("Result: "+result)
         def dependize[T <: Instantiable](v: VAL[T]): VAL[T] = v match {
-          case v.typ.Unknown => v
-          case v_ : T#Instance => v_.clone(cdeps)
+          case Unknown_?(v) => v
+          case Known_?(v) => v.clone(cdeps)
         }
-        def dependize_(v: VAL_) = dependize[Instantiable](v)
-        tracef = tracef +# (sink.get, result eval dependize_)
+        tracef = tracef +# (sink.get, result eval dependize[Instantiable])
       }
       /*
        *  Even if it's NoResult, we may propagate the result via eval_state.pseudo, i.e.

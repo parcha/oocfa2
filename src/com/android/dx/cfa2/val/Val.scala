@@ -3,9 +3,6 @@ package com.android.dx.cfa2.`val`
 import com.android.dx
 import dx.cfa2
 import cfa2._
-import tlc._
-//import tlc.Algebra._
-import tlc.Func._
 
 import scala.annotation.unchecked._
 import scala.collection.{Set => CSet, Seq => CSeq, _}
@@ -13,7 +10,7 @@ import immutable._
 import parallel.immutable._
 
 sealed abstract class Val[+T <: Instantiable]
-extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable with NotNull{
+extends immutable.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Serializable with NotNull{
   import Val._
   // TODO: Allow us to infer/capture the LUB of the typs of these vals
   final type Type = T
@@ -22,17 +19,12 @@ extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Seria
   
   // Set proxy
   final def self: CSet[VAL[T @uncheckedVariance]] = asSet.seq
-  val asSet: GenSet[VAL[T @uncheckedVariance]]
+  def asSet: GenSet[VAL[T @uncheckedVariance]]
   
   override lazy val size = super.size  
   
   final def union[T <: Instantiable](that:Val[T]) =
     Val.union(this, that)
-  
-  /*final override def equals(that) = that match {
-    case that:Val[T] => equals(this, that)
-    case _ => false
-  }*/
   
   final def eval [ArgT >: Type <: Instantiable, RetT <: Instantiable]
                  (f: VAL[ArgT]=>VAL[RetT]) : Val[RetT] = {
@@ -48,24 +40,13 @@ extends collection.SetProxy[VAL[T @uncheckedVariance]] with Immutable with Seria
       rets reduce Val.union[RetT, RetT, RetT]
   }
   
-  /*final def invoke(name:String, args:Val_*) : Val_ = {
-    
-  }*/
+  final def satisfies (test: VAL[T] => Boolean) = asSet exists test
   
-  final def satisfies (test: VAL[T] => Boolean) = asSet exists {test(_)}
-  
-  final def =?[T_ <: T @uncheckedVariance](that: Val[T_]): Tri = this match {
+  def =?[T_ <: T](that: Val[T_]): Tri = that match {
     case Bottom => Tri.F
-    case Top    => if(that==Bottom) Tri.F else Tri.U
-    case _      =>
-      that match {
-        case Bottom => Tri.F
-        case Top    => Tri.U
-        case _      => this.asSet == that.asSet
-      }
+    case Top    => Tri.U
+    case _      => this.asSet == that.asSet
   }
-  
-  //final def apply[R] (f: VAL[T] => R): immutable.Set[R] = asSet 
 }
 object Val {
   def apply[Join <: Instantiable]
@@ -94,7 +75,6 @@ object Val {
     vs_.size match {
       case 0 => Bottom
       case 1 => Atom(vs_.iterator.next)
-      //case 2 => XOr[Join, Join, Join](vs_(0), vs_(1))
       case _ => new UnionSet(vs_)
     }
   }
@@ -102,8 +82,8 @@ object Val {
   def unapplySeq[T <: Instantiable](v: Val[T]) : Seq[VAL[T]] = v match {
     case Bottom            => Seq()
     // TODO
-    case Top               => Seq()
-    //case Unknown(u)        => Seq(u)
+    case Top               =>
+      throw new UnsupportedOperationException("⊤ value cannot be expanded")
     case Atom(v_)          => Seq(v_)
     case UnionSet(vs @ _*) => Seq(vs:_*)
   }
@@ -124,17 +104,6 @@ object Val {
     case 1 => vs head
     case _ => vs reduce (union(_, _))
   }
-    
-  //TODO
-  /*def equals[T1 <: Join, T2 <: Join, Join <: Instantiable]
-            (v1: Val[T1], v2: Val[T2]) : Boolean = {
-    val s1 = unapplySeq(v1)
-    val s2 = unapplySeq(v2)
-    if(s1.size != s2.size) false
-    else {
-      s1.
-    }
-  }*/
   
   def eval[ArgT <: Instantiable, RetT <: Instantiable]
           (f: Seq[VAL[ArgT]]=>VAL[RetT])(vargs: Val[ArgT]*) : Val[RetT] = {
@@ -165,17 +134,19 @@ object Val {
   
   case object Bottom extends Val[Nothing] {
     val asSet = Set[VAL[Nothing]]()
+    override def =?[T_ <: Nothing](that) = that == Bottom
   }
   // TODO: How can we get this to actually be Top?
   case object Top extends Val[Nothing] {
-    val asSet = Set[VAL[Nothing]]()
+    lazy val asSet = throw new UnsupportedOperationException("⊤ value cannot be converted to a set")
+    override def =?[T_ <: Nothing](that) = if(that == Bottom) Tri.F else Tri.U 
   }
   
   /** Special "subtype" just for checking if a value is unknown */
-  object Unknown /*extends Atom[Nothing](null)*/ {
-    def apply[T <: Instantiable](typ:T) = Atom(typ.unknown)
-    def apply[T <: Instantiable](typs:T*) = Val((typs map {_.unknown}).toSet)
-    def apply[T <: Instantiable](typs:collection.Iterable[T]) = Val((typs map {_.unknown}).toSet)
+  object Unknown {
+    def apply[T <: Instantiable](typ:T): Val[typ.type] = Atom[typ.type](typ.unknown)
+    def apply[T <: Instantiable](typs:T*): Val[T] = Val((typs map {_.unknown}).toSet)
+    def apply[T <: Instantiable](typs:collection.Iterable[T]): Val[T] = Val((typs map {_.unknown}).toSet)
     def unapply[T <: Instantiable](atom:Atom[T]) : Option[VAL[T]] =
       if(atom.v.isUnknown) Some(atom.v)
       else None
@@ -185,11 +156,6 @@ object Val {
     val asSet: Set[VAL[T @uncheckedVariance]] = Set(v)
   }
   type Atom_ = Atom[Instantiable]
-  
-  /*final case class XOr [+T1 <: Instantiable, +T2 <: Instantiable,
-                        +Join : Join2[T1, T2, Instantiable]# ^]
-                        (v1:VAL[T1], v2:VAL[T2])
-  extends Val[Join]*/
   
   final class UnionSet[Join <: Instantiable] private[Val]
                       (vs: GenSet[SUBV[SUBT[Join]]])

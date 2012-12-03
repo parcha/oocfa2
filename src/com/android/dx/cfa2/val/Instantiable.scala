@@ -19,11 +19,17 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
   // Open-recursion through Self at the type-level
   //type Self >: this.type <: Instantiable
   //type Self <: this.type
-  final type Self = this.type
+  final type Self = self.type
   val klass : Class[_]
+  if(klass != null)
+    register(klass, this)
+  implicit val klassTag = ClassTag(klass)
   
   /** Some "instantiables" aren't actually usable (*cough*void*cough*) **/
   val isGhost = !this.isInstanceOf[CanBeParam]
+  
+  /** The default value the JVM gives to uninitialized instances of this type **/
+  val defaultInst: Instance_
   
   /**
    * Represents a value of this type. They must be referentially distinct within the
@@ -57,6 +63,13 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     }
     final def dependsUpon(vs: GenIterable[Val_]) : Tri =
       Tri.any(vs map dependsUpon)
+      
+    final def satisfies(f: Instance => Tri): Tri = this match {
+      // FIXME case Unknown_?(_) => Tri.U
+      // FIXME: Why do we have to mark Instance here? Scala typechecker fail
+      case Known_?(v:Instance) => f(v)
+    }
+    final def satisfies(f: Instance => Boolean): Tri = this satisfies (f andThen Tri.lift)
   }
   /**
    * This is for an entirely unknown instance of this type. Importantly, there is a similar but
@@ -91,8 +104,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
    * Extraction should occur via the provided "param" method and the extracted fields should be lazy vals.
    */
   // TODO: Introspect on params to identify other VALs and Vals which we depend upon
-  protected abstract class Instance_(protected[this] final var params: IParams,
-                                     protected[this] final val deps: Val_) extends self.Value { _:Instance =>
+  protected[this] abstract class Instance_(protected[this] final var params: IParams,
+                                           protected[this] final val deps: Val_) extends self.Value { _:Instance =>
     private var _origin: Option[self.Instance] = None
     def origin = {assert(_origin != this); _origin}
     
@@ -227,61 +240,129 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     private type Repr = GenMap[Int, Entry]
     final val klass =
       if(component_typ.klass == null) null
-      else ClassTag(component_typ.klass).wrap.runtimeClass
+      else component_typ.klassTag.wrap.runtimeClass
+      
+    type GetResult = Option[Entry]
     
     instance_param_[Repr]('array, new par.immutable.ParHashMap())
-    instance_param[Val[INT.type]]('length)
-    instance_param_[Option[Entry]]('default, None)
+    /* length is a VAL instead of a Val because we want different-length arrays
+     * put together in a Val, not held by the same Instance. This way we can e.g.
+     * prune impossibilities resulting from OOB exceptions.
+     */
+    instance_param[VAL[INT.type]]('length)
+    instance_param_[Entry]('default, Val.Atom[component_typ.type](component_typ.defaultInst))
     
     protected[this] val constructor = new Instance(_, _)
     
+    /** See the discussion of unknowns in OBJECT **/
+    override def unknown(deps: Val_) = constructor(paramify(('unknown, true),
+                                                            ('length, INT.unknown), // TODO: make a natural number
+                                                            ('isNull, Tri.U),
+                                                            ('monitored, Tri.U)), deps)
+    
     protected[this] final class Instance_ (params: IParams, deps: Val_) extends super.Instance_(params, deps) { self=>
+      import IndexCheck._
       private[this] lazy val array = param[Repr]('array)
-      private[this] lazy val length = param[Val[INT.type]]('length)
-      private[this] lazy val default = param[Option[Entry]]('default)
+      private[this] lazy val length = param[VAL[INT.type]]('length)
+      private[this] lazy val default = param[Entry]('default)
+      
+      private[this] def checkIndex(i: Int): Tri = length match {
+        case Unknown_?(_) => Tri.U
+        case Known_?(l)   => i < l.self
+      }
+      private[this] def checkIndex(i: VAL[INT.type]): Tri = length match {
+        case Unknown_?(_) => Tri.U
+        case Known_?(l)   => i match {
+          case Unknown_?(_) => Tri.U
+          case Known_?(i)   => i.self < l.self
+        }
+      }
+      private[this] def checkIndex(i: Val[INT.type]): Tri = length match {
+        case Unknown_?(_) => Tri.U
+        case Known_?(l)   =>
+          if(i satisfies {_.isUnknown}) Tri.U
+          else {
+            val count = i.asSet count {_.asInstanceOf[INST[INT.type]].self < l.self}
+            if(count == 0) Tri.F
+            else if(count == i.asSet.size) Tri.T
+            else Tri.U
+          }
+      }
+      
+      // TODO: Perhaps macroize?
+      private[this] def wrapIndexCheck[R](i: Int, thunk: =>R): IndexCheck[R] = checkIndex(i) match {
+        case Tri.T => Within(thunk)
+        case Tri.U => Maybe(thunk)
+        case Tri.F => Outside
+      }
+      private[this] def wrapIndexCheck[R](i: VAL[INT.type], thunk: =>R): IndexCheck[R] = checkIndex(i) match {
+        case Tri.T => Within(thunk)
+        case Tri.U => Maybe(thunk)
+        case Tri.F => Outside
+      }
+      private[this] def wrapIndexCheck[R](i: Val[INT.type], thunk: =>R): IndexCheck[R] = checkIndex(i) match {
+        case Tri.T => Within(thunk)
+        case Tri.U => Maybe(thunk)
+        case Tri.F => Outside
+      }
+      
+      val NotExists = if(isUnknown) None else Some(default)
       
       protected[this] def get(i: Int): Option[Entry] = array.get(i)
-      //protected[this] def length: Val[INT.type]
-      //protected[this] def default: Option[Entry]
       
       protected[this] final class Ref_(env: HeapEnv) extends super.Ref_()(env) {
       def length = self.length
-      def default = self.default
+      def default = self.default 
       
-      def apply(i: Int) : Option[Entry] = get(i)
-      def apply(i: VAL[INT.type]) : Option[Entry] = i match {
-        case _:INT.Unknown =>
-          if(array isEmpty) None
+      def apply(i: Int) : IndexCheck[GetResult] = wrapIndexCheck(i,
+        get(i) match {
+          case Some(v) => Some(v)
+          case None    => NotExists
+        })
+      def apply(i: VAL[INT.type]) : IndexCheck[GetResult] = wrapIndexCheck(i,
+        i match {
+        case Unknown_?(_) =>
+          if(array isEmpty) NotExists
           else Some(Val.deepUnion[component_typ.type](array.seq.values))
-        case i:INT.Instance =>
+        case Known_?(i) =>
           get(i.self)
-      }
-      def apply(is: Val[INT.type]) : Option[Entry]= is match {
+        })
+      def apply(is: Val[INT.type]) : IndexCheck[GetResult]= wrapIndexCheck(is,
+        is match {
         case Val.Unknown(_) =>
-          if(array isEmpty) None
+          if(array isEmpty) NotExists
           else Some(Val.deepUnion[component_typ.type](array.seq.values))
         case _ =>
-          val poss = is map ((i: VAL[INT.type])=>apply(i))
+          val poss = is map ((i: VAL[INT.type])=>apply(i).asInstanceOf[WithRet[GetResult]].ret)
           if(poss contains None) None
           else Some(Val.deepUnion[component_typ.type](poss map (_.get)))
-      }
+        })
       
       /** Update */
-      def apply(vi: Val[INT.type], entry: Entry) : Instance = vi match {
+      // FIXME: type of entry should be ENTRY, but everything gets really complicated...
+      def apply(vi: Val[INT.type], entry: Val_): IndexCheck[Instance] = wrapIndexCheck(vi,
+        vi match {
         case Val.Unknown(_) =>
           val new_array = array ++
             (for((k,v) <- array)
               yield (k,(v union entry).asInstanceOf[Entry]))
-          clone(('array, new_array), ('default, Some(entry)))(vi)
+          // Merge a new default, as we could've assigned anywhere
+          clone(('array, new_array), ('default, default union entry))(vi)
         case _ =>
+          // Only handle possibly valid indices
+          val is = vi.asSet filterNot {checkIndex(_) == Tri.F}
+          def validate(ret: GetResult) = ret match {
+            case None    => Val.Unknown(component_typ)
+            case Some(v) => v
+          }
           val new_array = array ++
-            (for(i <- vi.asSet)
-              yield (i.asInstanceOf[INT.Instance].self,
-                     (apply(i).get union entry).asInstanceOf[Entry]))
+            (for(i <- is)
+              yield (i.asInstanceOf[INST[INT.type]].self,
+                     validate(apply(i).asInstanceOf[WithRet[GetResult]].ret) union entry))
           clone(('array, new_array))(vi)
+        })
       }
-      }
-      final type Ref = Ref_
+      type Ref = Ref_
       val ref = new Ref(_)
     }
     type Instance = Instance_
@@ -297,7 +378,11 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
     assert(component_typ.isInstanceOf[Reflected[_]])
   }*/
 }
-object Instantiable {
+object Instantiable extends Registrar[Class[_], Instantiable] {
+  import registry._
+  private def register(c: Class[_], t: Instantiable) = registry register (c, t)
+  def typeForClass(c: Class[_]): Option[Instantiable] = registry registered c
+  
   private case class IParamRegistryEntry[T](
     manifest: ClassManifest[T],
     default: Option[Either[() => _<:T, T]],
@@ -326,6 +411,14 @@ object Instantiable {
       else converter(v)
     def clone(default: Option[Either[() => _<:T, T]]=default,
               checker: T => Unit=checker) = IParamRegistryEntry[T](manifest, default, checker, converter)
+  }
+  
+  sealed abstract class IndexCheck[+R]
+  object IndexCheck {
+    sealed abstract class WithRet[R](val ret:R) extends IndexCheck[R]
+    final case class Within[R](ret:R) extends WithRet[R](ret)
+    final case class Maybe[R](ret:R) extends WithRet[R](ret)
+    final case object Outside extends IndexCheck[Nothing]
   }
 }
 

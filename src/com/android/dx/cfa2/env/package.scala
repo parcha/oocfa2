@@ -8,5 +8,4 @@ import `val`._
 
 package object env {
   type FEnv_ = FEnv[FieldSpec, Var.Field[Instantiable, FieldSpec]]
-  type StaticEnv = SFEnv
 }

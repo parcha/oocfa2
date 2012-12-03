@@ -6,7 +6,6 @@ import cfa2._
 import time._
 import `val`._
 import prop._
-import tlc.Algebra._
 
 /**
  * Leaf classes should be case classes based on src (or its components) such that

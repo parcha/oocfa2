@@ -9,6 +9,7 @@ import env._
 import Tri._
 import parsers._
 import scala.reflect.{ClassTag, classTag}
+import scala.reflect.runtime.universe._
 
 /**
  * Also counts as the top type.
@@ -125,7 +126,7 @@ object Type extends Registrar[RawType, Type] {
     assert(!raw.isPrimitive)
     if(raw.isArray) {
       // Recurse through nested array types
-      def drill(raw:RawType) : ARRAY = {
+      def drill(raw:RawType) : ARRAY_ = {
         val t =
           if(raw.isArray) drill(raw.getComponentType)
           else Type(raw).asInstanceOf[Instantiable]
@@ -134,23 +135,36 @@ object Type extends Registrar[RawType, Type] {
       drill(raw)
     }
     else {
-      // Trigger registry of the unknown lifted type and attempt to infer its attributes
-      // TODO
-      /*val loader = ClassLoader.getSystemClassLoader
-      val klass = try {
-        loader loadClass raw.getClassName
-      } catch {
-        case _:ClassNotFoundException => null
-      }*/
-      new OBJECT(raw) with Incomplete {
-        protected val constructor = new Instance(_, _)
-        protected class Instance_ private[`val`] (params: IParams, deps: Val_)
-        extends super.Instance_(params, deps) {
-          class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
-          type Ref = Ref_
-          protected[this] val ref = new Ref(_)
+      lazy val default =
+        new OBJECT(raw) with Incomplete {
+          protected val constructor = new Instance(_, _)
+          protected class Instance_ private[`val`] (params: IParams, deps: Val_)
+          extends super.Instance_(params, deps) {
+            class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
+            type Ref = Ref_
+            protected[this] val ref = new Ref(_)
+          }
+          type Instance = Instance_
         }
-        type Instance = Instance_
+      // FIXME: Somehow dynamically inject dependencies here, or at least macroize built-ins
+      // HACK: seek out exceptionals and register them appropriately
+      BuiltinAnalysisClassLoader.reflectClass(raw) match {
+        case None => default
+        case Some(klass) => ClassTag(klass) match {
+          case t if t <:< classTag[Throwable] =>
+            new Exceptionals.THROWABLE(raw) with Incomplete {
+              protected val constructor = new Instance(_, _)
+              protected class Instance_ private[`val`] (params: IParams, deps: Val_)
+              extends super.Instance_(params, deps) {
+                class Ref_ protected[Instance_] (env: HeapEnv) extends super.Ref_(env)
+                type Ref = Ref_
+                protected[this] val ref = new Ref(_)
+              }
+              type Instance = Instance_
+            }
+          case _ => default
+        }
+          
       }
     }
   }

@@ -1,12 +1,16 @@
 package com.android.dx.cfa2
 
 import com.android.dx
+import dx.cfa2._
+import parsers._
+import dx.rop.`type`.{Type => DType}
+import java.lang.{Class => JClass}
 import java.net.{URLClassLoader, URL}
 
 class AnalysisClassLoader(parent: ClassLoader, urls: Iterable[URL] = List())
 extends URLClassLoader(urls.toArray, parent) {
   
-  def reflectClass(name: String) : Option[Class[_]] =
+  def reflectClass(name: String) : Option[JClass[_]] =
     try Some(loadClass(name))
     catch {
       case _:ClassNotFoundException =>
@@ -16,6 +20,10 @@ extends URLClassLoader(urls.toArray, parent) {
         warn("In attempting to load "+name+" for reflection, a depedency could not be found: "+e.getMessage)
         None
     }
+  def reflectClass(dalvikType: DType) : Option[JClass[_]] = {
+    val descriptorMatch = (descriptorRegex findFirstMatchIn dalvikType.getDescriptor).get
+    reflectClass(descriptorMatch.group("classname").replace('/', '.'))
+  }
   
   private[cfa2] def +=(url: URL) = super.addURL(url)
   
