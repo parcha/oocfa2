@@ -99,7 +99,8 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
           ((v: VAL[Instantiable]) => f(!v.asInstanceOf[Instance]))
     }
     /** Assert that this is the newest value, so just dummy-reference it */
-    private final def unary_! : Instance#Ref = ref(null)
+    // FIXME: Currently exposed vs private as a sheer hack
+    final def unary_! : Instance#Ref = ref(null)
   }
   type Instance <: Instance_
 }
@@ -109,11 +110,6 @@ object RefType {
   def nextHeapToken = heapTokenCounter.getAndIncrement()
 }
 
-/*
- *  FIXME: Completely unsure how to handle this
- *  * What should singleton be?
- *  * Should this extend OBJECT? If so, how are e.g. fields dealt with?
- */
 object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
   val klass = classTag[javax.lang.model.`type`.NullType].runtimeClass
   /*  NULL subtypes all RefTypes

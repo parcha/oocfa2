@@ -36,8 +36,6 @@ package object `val` {
   type Reflected_ = Reflected[_]
   type Dynamic_ = Dynamic[_]
   
-  type NULL = NULL.type
-  
   // Witnesses
   object Unknown_? {
     def unapply[T <: Instantiable](v:VAL[T]): Option[UNKNOWN[T]] =

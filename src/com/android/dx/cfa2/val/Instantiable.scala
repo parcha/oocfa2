@@ -65,11 +65,11 @@ abstract class Instantiable(raw:RawType) extends Type(raw) { self =>
       Tri.any(vs map dependsUpon)
       
     final def satisfies(f: Instance => Tri): Tri = this match {
-      // FIXME case Unknown_?(_) => Tri.U
+      case Unknown_?(_) => Tri.U
       // FIXME: Why do we have to mark Instance here? Scala typechecker fail
       case Known_?(v:Instance) => f(v)
     }
-    final def satisfies(f: Instance => Boolean): Tri = this satisfies (f andThen Tri.lift)
+    //final def satisfies(f: Instance => Boolean): Tri = this satisfies (f andThen Tri.lift)
   }
   /**
    * This is for an entirely unknown instance of this type. Importantly, there is a similar but

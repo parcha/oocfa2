@@ -8,7 +8,7 @@ sealed abstract class RetVal extends Immutable with NotNull with Serializable {
 }
 object RetVal {
   trait WithReturn[T <: Returnable] extends RetVal { val rv: Val[T] }
-  type WithReturn_ = WithReturn[_ <: Returnable]
+  type WithReturn_ = WithReturn[Returnable]
   final case class Return [T <: Returnable] (rv:Val[T]) extends RetVal with WithReturn[T] {
     def union[RV <: RetVal](other: RV) = other match {
       case Return(v)     =>
@@ -18,10 +18,10 @@ object RetVal {
       case d:Dual_  => d union this
     }
   }
-  type Return_ = Return[_ <: Returnable]
+  type Return_ = Return[Returnable]
   
   trait WithThrow[E <: Exceptional] extends RetVal { val ev: Val[E] }
-  type WithThrow_ = WithThrow[_ <: Exceptional]
+  type WithThrow_ = WithThrow[Exceptional]
   final case class Throw [E <: Exceptional] (ev:Val[E]) extends RetVal with WithThrow[E] {
     def union[RV <: RetVal](other: RV) = other match {
       case Return(rv)       => Dual(rv, ev)
@@ -31,7 +31,7 @@ object RetVal {
       case d:Dual_   => d union this
     }
   }
-  type Throw_ = Throw[_ <: Exceptional]
+  type Throw_ = Throw[Exceptional]
   
   final case class Dual[T <: Returnable, E <: Exceptional] private[RetVal]
                        (rv: Val[T], ev: Val[E]) extends RetVal with WithReturn[T] with WithThrow[E] {
@@ -41,5 +41,5 @@ object RetVal {
       case Dual(rv_, ev_) => Dual(rv union rv_, (ev union ev_).asInstanceOf[Val[Exceptional]])
     }
   }
-  type Dual_ = Dual[_ <: Returnable, _ <: Exceptional]
+  type Dual_ = Dual[Returnable, Exceptional]
 }
