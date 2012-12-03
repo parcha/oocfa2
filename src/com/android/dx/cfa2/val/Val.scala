@@ -77,12 +77,12 @@ object Val {
   }
   
   def unapplySeq[T <: Instantiable](v: Val[T]) : Seq[VAL[T]] = v match {
-    case Bottom            => Seq()
+    case Bottom       => Seq()
     // TODO
-    case Top               =>
+    case Top          =>
       throw new UnsupportedOperationException("⊤ value cannot be expanded")
-    case Atom(v_)          => Seq(v_)
-    case UnionSet(vs @ _*) => Seq(vs:_*)
+    case Atom(v_)     => Seq(v_)
+    case UnionSet(vs) => vs.toSeq.seq.asInstanceOf[Seq[VAL[T]]]
   }
   
   def union[T1 <: Join, T2 <: Join, Join <: Instantiable]
@@ -149,19 +149,19 @@ object Val {
       else None
   }
   
-  sealed case class Atom [+T <: Instantiable] (v:VAL[T]) extends Val[T] {
+  sealed case class Atom [T <: Instantiable] (v:VAL[T]) extends Val[T] {
     val asSet: Set[VAL[T @uncheckedVariance]] = Set(v)
   }
   type Atom_ = Atom[Instantiable]
   
-  final class UnionSet[Join <: Instantiable] private[Val]
-                      (vs: GenSet[SUBV[SUBT[Join]]])
+  final case class UnionSet[Join <: Instantiable] private[Val]
+                           (vs: GenSet[VAL[Join]])
   extends Val[Join] {
     override lazy val asSet = vs
   }
   type UnionSet_ = UnionSet[Instantiable]
   object UnionSet {
     def apply[J <: Instantiable](vs: SUBV[SUBT[J]]*) = new UnionSet[J](Set(vs:_*))
-    def unapplySeq[J <: Instantiable](u:UnionSet[J]) : Option[CSeq[SUBV[J]]] = Some(u.asSet.toSeq.seq)
+    def unapplySeq[J <: Instantiable](u:UnionSet[J]) : Option[CSeq[SUBV[J]]] = Some(u.vs.toSeq.seq)
   }
 }
