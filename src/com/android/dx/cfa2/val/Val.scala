@@ -77,7 +77,8 @@ object Val {
   }
   def apply[Join <: Instantiable]
            (untyped: Boolean, vs: Val[Join]*) : Val[Join] =
-    apply(vs map {_.asSet} reduce {_ union _}, untyped)
+    if(untyped && (vs contains Val.Top)) Val.Top
+    else apply(vs map {_.asSet} reduce {_ union _}, untyped)
   
   def unapplySeq[T <: Instantiable](v: Val[T]) : Seq[VAL[T]] = v match {
     case Bottom       => Seq()
@@ -138,7 +139,7 @@ object Val {
   }
   // TODO: How can we get this to actually be Top?
   case object Top extends Val[Nothing] {
-    lazy val asSet = throw new UnsupportedOperationException("⊤ value cannot be converted to a set")
+    lazy val asSet = throw new InternalError("⊤ value cannot be converted to a set")
     override def =?[T_ <: Nothing](that) = if(that == Bottom) Tri.F else Tri.U 
   }
   
