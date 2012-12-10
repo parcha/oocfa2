@@ -48,12 +48,14 @@ object CFA2Analysis {
     protected[this] def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
     protected[this] def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
       (sym, new DualLogger(primary, mkLog(sym)._2))
-      
+    
+    private[this] lazy val debugLog = new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))
     protected[this] def _logs = immutable.Map(
       mkLog('out, new PrintLogger(System.out)),
-      mkLog('info, new PrintLogger(System.err)),
-      mkLog('warn, new PrintLogger(System.err)),
-      ('debug, new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))),
+      // FIXME: Hack to get info and warn streams interleaved into debug
+      mkLog('info, new DualLogger(new PrintLogger(System.err), debugLog)),
+      mkLog('warn, new DualLogger(new PrintLogger(System.err), debugLog)),
+      ('debug, debugLog),
       mkLog('error, new PrintLogger(System.err)))
     final lazy val logs = _logs
     lazy val log = new Opts.Loggers(logs)
@@ -1051,8 +1053,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           // FIXME: What if it returns void?
           @inline
           def call(mdesc: MethodDesc) = mdesc match {
-            case m: GhostMethod => call_unknown(m)
-            case m: Method      => call_known(m)
+            case m: Method => call_known(m)
+            case m         => call_unknown(m)
           }
           
           @inline

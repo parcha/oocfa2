@@ -106,7 +106,8 @@ object Type extends Registrar[RawType, Type] {
     for(i <- 0 until raws.size)
       yield apply(raws.get(i))
   }
-  def apply(klass: Class[_]): Type = intern(RawType.internClassName(klass.getName))
+  def apply(klass: Class[_]): Type =
+    intern(RawType.internClassName(klass.getName.replaceAll("\\.","/")))
   def apply[C: ClassTag]: Type = apply(classTag[C].runtimeClass)
   /** May throw IllegalArgumentException if the class name given isn't valid **/
   def apply(type_id: TypeIDExpr): Type = intern(RawType.intern(type_id.descriptor))

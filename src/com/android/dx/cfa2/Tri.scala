@@ -44,6 +44,7 @@ object Tri {
     val unary_+ = true
     val unary_- = true
   }
+  def apply(b: Boolean) = lift(b)
   implicit def lift(b:Boolean): Tri =
     if(b) T
     else  F

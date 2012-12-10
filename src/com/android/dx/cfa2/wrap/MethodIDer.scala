@@ -68,19 +68,6 @@ object MethodIDer {
   
   // Convenience
   final case object Accessible extends MethodIDer {
-    import dx.cfa2.prop.Properties
-    @inline
-    private def isAccessible(m: Method) = {
-      /*def hasFinalClass = classForMethod(m) match {
-        case Some(c) => Class(c) is Properties.Final
-        case None    => false // Conservative assumption
-      }*/
-      (m is Properties.Public) ||
-      ((m is Properties.Protected)/* && !hasFinalClass*/)
-    }
-    def identifies(m: MethodDesc) = m match {
-      case m: Method => isAccessible(m)
-      case _         => Tri.U
-    }
+    def identifies(m: MethodDesc) = m.isAccessible
   }
 }

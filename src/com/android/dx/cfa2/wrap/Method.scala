@@ -6,7 +6,8 @@ import dx.rop.code.RopMethod
 import dx.cfa2
 import cfa2._
 import `val`._
-import prop.Properties._
+import prop._
+import Properties._
 import parsers._
 import scala.collection._
 import java.lang.{Class => JClass}
@@ -66,11 +67,22 @@ sealed trait MethodDesc extends Immutable with NotNull {
   
   val isFinal = reflection match {
     case Some(refl) => Final.testJMember(refl)
-    case None       => Tri.U | (parent.isFinal == Tri.T)
+    case None       => Tri.U | ((parent is Final) == Tri.T)
   }
   val isIMethod: Tri = reflection match {
     case Some(refl) => !Static.testJMember(refl)
     case None       => Tri.U
+  }
+  
+  final def is(prop: Property) = {
+    assert(Domain.Method contains prop)
+    _is(prop)
+  }
+  def _is(prop: Property): Tri
+  
+  final val isAccessible = parent.isAccessible & {
+    (this is Properties.Public) |
+    ((this is Properties.Protected) & !(this is Final))
   }
   
   // FIXME: Need to figure out how to /always/ determine whether it's an instance method or not
@@ -148,15 +160,13 @@ final case class Method private (val raw:Raw, val rop:RopMethod) extends DalvikM
   def firstBlock = blocks(rop.getFirstLabel)
   
   lazy val props = prop.Range(prop.Domain.Method, accessFlags)
-  def is(prop: Property*) = props contains(prop:_*)
+  def _is(prop: Property) = props contains prop
   lazy val parent = GhostClass(raw.getDefiningClass)
   def accessFlags = raw.getAccessFlags
   // FIXME: We need to exclude the "this" so we can vary on it; also lines up with Ghost and Refl
   def prototype = raw.getEffectiveDescriptor
   def attributes(attr: String) = raw.getAttributes.findFirst(attr)
   
-  override val isIMethod: Tri = !is(Static)
-  override val isFinal: Tri = is(Final)
   def nat = raw.getNat
   lazy val dump = rop.dump
 }
@@ -170,10 +180,24 @@ final case class GhostMethod private (val spec:MethodSpec) extends DalvikMethodD
   def prototype = spec.getPrototype
   lazy val parent = GhostClass(spec.getDefiningClass)
   def nat = spec.getNat
+  lazy val props = reflection match {
+    case None       => null
+    case Some(refl) => Domain.Method.fromJMember(refl)
+  }
+  def _is(prop: Property) =
+    if(props == null) Tri.U
+    else props(prop)
 }
 object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
   private def intern(spec:MethodSpec) = cache.cache (spec, new GhostMethod(spec))
-  implicit def wrap(spec:MethodSpec) = cache cachedOrElse (spec, intern(spec))
+  implicit def wrap(spec:MethodSpec) = {
+    // Upgrade to ReflMethod if we can
+    val ghost = cache cachedOrElse (spec, intern(spec))
+    ghost.reflection match {
+      case Some(refl) => ReflMethod.wrap(refl)
+      case None       => ghost
+    }
+  }
   implicit def unwrap(gm:GhostMethod) = gm.spec
 }
 
@@ -186,6 +210,8 @@ final case class ReflMethod private (private val refl: JMethod) extends MethodDe
   def argCs = Some(refl.getParameterTypes())
   
   def reflection = Some(refl)
+  lazy val props = Domain.Method.fromJMember(refl)
+  def _is(prop: Property) = props(prop)
 }
 object ReflMethod extends Cacher[JMethod, ReflMethod] {
   private def intern(refl:JMethod) = cache.cache (refl, new ReflMethod(refl))
