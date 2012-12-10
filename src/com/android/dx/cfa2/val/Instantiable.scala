@@ -157,7 +157,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
       clone
     }
     final def clone(extraDeps: Val_ *) : Instance = {
-      val clone = constructor(params, deps union Val.Atom(this) union Val.deepUnion(extraDeps))
+      val clone = constructor(params, Val(true, deps, Val.Atom(this), Val.deepUnion(extraDeps)))
       clone._origin = Some(this)
       clone
     }
