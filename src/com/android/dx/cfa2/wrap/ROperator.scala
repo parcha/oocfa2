@@ -22,9 +22,9 @@ final case class ROperator(val raw:Rop) extends AnyVal with NotNull {
 }
 object ROperator {
   object Branchingnesses extends Enumeration(1) {
-    type Branchingness = Value
     val NONE, RETURN, GOTO, IF, SWITCH, THROW = Value
   }
+  type Branchingness = Branchingnesses.Value
 }
 
 /** Wrapped opcodes */

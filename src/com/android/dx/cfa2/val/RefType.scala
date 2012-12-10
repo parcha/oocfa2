@@ -107,7 +107,7 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
 object RefType {
   import java.util.concurrent.atomic.AtomicLong
   private val heapTokenCounter = new AtomicLong
-  def nextHeapToken = heapTokenCounter.getAndIncrement()
+  def nextHeapToken = heapTokenCounter.getAndIncrement() + 1000 //Makes it easier to distinguish
 }
 
 object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {

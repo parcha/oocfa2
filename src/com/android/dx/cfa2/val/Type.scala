@@ -124,7 +124,7 @@ object Type extends Registrar[RawType, Type] {
   // Not a pre-registered type; most importantly: must be a reftype
   private def registerIncomplete(raw: RawType) : RefType = {
     assert(!raw.isPrimitive)
-    if(raw.isArray) registerArray(raw)
+    if(raw.isArray) registerArray(raw.getComponentType)
     else registerReflected(raw)
   }
   private def registerArray(raw: RawType) : ARRAY_ = {

@@ -55,7 +55,7 @@ package object cfa2 {
     }
   }
   
-  final case class InternalError(cause: Throwable = null, msg: String = null) extends RuntimeException(msg, cause)
+  final case class InternalError(msg: String = null, cause: Throwable = null) extends RuntimeException(msg, cause)
   
   /* ============= Interfacing with Java codebase ======== */
   /*import dx.rop.code.{BasicBlock=>BB}

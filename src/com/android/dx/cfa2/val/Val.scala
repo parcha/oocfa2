@@ -49,7 +49,7 @@ object Val {
   def apply[Join <: Instantiable]
            (vs: VAL[Join]*) : Val[Join] = apply(vs.toSet)
   def apply[Join <: Instantiable]
-           (vs: GenSet[VAL[Join]]) : Val[Join] = {
+           (vs: GenSet[VAL[Join]], untyped: Boolean = false) : Val[Join] = {
     val vs_ = {
       // Only keep values of a type which is not superseded by an unknown of a subtype
       val superceded = mutable.Set[VAL[Join]]()
@@ -72,9 +72,12 @@ object Val {
     vs_.size match {
       case 0 => Bottom
       case 1 => Atom(vs_.iterator.next)
-      case _ => new UnionSet(vs_)
+      case _ => new UnionSet(vs_)(untyped)
     }
   }
+  def apply[Join <: Instantiable]
+           (untyped: Boolean, vs: Val[Join]*) : Val[Join] =
+    apply(vs map {_.asSet} reduce {_ union _}, untyped)
   
   def unapplySeq[T <: Instantiable](v: Val[T]) : Seq[VAL[T]] = v match {
     case Bottom       => Seq()
@@ -155,13 +158,20 @@ object Val {
   type Atom_ = Atom[Instantiable]
   
   final case class UnionSet[Join <: Instantiable] private[Val]
-                           (vs: GenSet[VAL[Join]])
+                           (vs: GenSet[VAL[Join]])(untyped: Boolean = false)
   extends Val[Join] {
+    // Ensure the types of the values involved are related
+    if(CFA2Analysis.debug && !untyped) {
+      for(v1 <- vs)
+        for(v2 <- vs)
+          assert(+(v1.typ < v2.typ) || +(v1.typ > v2.typ),
+                 s"Unrelated values:\n$v1\n$v2")
+    }
     override lazy val asSet = vs
   }
   type UnionSet_ = UnionSet[Instantiable]
   object UnionSet {
-    def apply[J <: Instantiable](vs: SUBV[SUBT[J]]*) = new UnionSet[J](Set(vs:_*))
+    def apply[J <: Instantiable](vs: SUBV[SUBT[J]]*) = new UnionSet[J](Set(vs:_*))()
     def unapplySeq[J <: Instantiable](u:UnionSet[J]) : Option[CSeq[SUBV[J]]] = Some(u.vs.toSeq.seq)
   }
 }

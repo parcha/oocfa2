@@ -141,7 +141,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
     final def clone(_params: (Symbol, Any)*)(implicit extraDeps: Val_ *) : Instance =
       clone(paramify(_params:_*), extraDeps)
     final def clone(_params: IParams, extraDeps: Seq[Val_]) : Instance = {
-      val deps_ = deps union Val.Atom(this) union Val.deepUnion(extraDeps)
+      val deps_ = Val(true, deps, Val.Atom(this), Val.deepUnion(extraDeps))
       var params_ = _params
       
       def addMissingParams(ps: IParams) =
@@ -248,8 +248,18 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
     final val klass =
       if(component_typ.klass == null) null
       else ClassTag(component_typ.klass).wrap.runtimeClass
+    
+    protected override def << (t: Type) = t match {
+      case t:Array => component_typ < t.component_typ
+      case _ => Tri.F
+    }
+    protected override def >> (t: Type) = t match {
+      case t:Array => component_typ > t.component_typ
+      case _ => Tri.F
+    }
+    
     final lazy val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
-      
+    
     type GetResult = Option[Entry]
     
     instance_param_[Repr]('array, new par.immutable.ParHashMap())
@@ -314,7 +324,12 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
         case Tri.F => Outside
       }
       
-      val NotExists = if(isUnknown) None else Some(default)
+      def NotExists =
+        if(isUnknown) None
+        else {
+          CFA2Analysis.log('debug) (s"Reading uninitialized value from $this")
+          Some(default)
+        }
       
       protected[this] def get(i: Int): Option[Entry] = array.get(i)
       
@@ -345,13 +360,49 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
           if(poss contains None) None
           else Some(Val.deepUnion[component_typ.type](poss map (_.get)))
         })
+        
+      type StorageCheck = Instantiable.StorageCheck[Instance]
+      
+      private[this] def checkStorage(entry: Val_): (Tri, Entry) = {
+        def test(v: VAL_) = v.typ < component_typ
+        val (poss, no) = entry.asSet partition {+test(_)}
+        if(!no.isEmpty)
+          CFA2Analysis.log('warn)(s"Found guaranteed invalid array stores for $component_typ: $no")
+        if(poss.isEmpty) (Tri.F, Val.Bottom)
+        else {
+          val (yes, maybe) = poss partition {test(_) == Tri.T}
+          if(!maybe.isEmpty) {
+            import CFA2Analysis.Opts.ArrayCovarianceBehaviors._
+            CFA2Analysis.singleton.opts.arrayCovarianceBehavior match {
+              case Warn =>
+                CFA2Analysis.log('debug)(s"Possibly invalid array stores for $component_typ: $maybe")
+                (Tri.U, Val(poss).asInstanceOf[Entry])
+              case Mask =>
+                CFA2Analysis.log('debug)(s"Possibly invalid array stores for $component_typ: $maybe")
+                (Tri.U, (Val(yes) union Val.Unknown(component_typ)).asInstanceOf[Entry])
+            }
+          }
+          else if(no.isEmpty) (Tri.T, entry.asInstanceOf[Entry])
+          else (Tri.U, Val(poss).asInstanceOf[Entry])
+        }
+      }
+      
+      def wrapStorageCheck(entry: Val_, thunk: Entry => Instance): StorageCheck = {
+        import StorageCheck._
+        checkStorage(entry) match {
+        case (Tri.T, entry) => OK(thunk(entry))
+        case (Tri.U, entry) => Maybe(thunk(entry))
+        case (Tri.F, _)     => Fail
+        }
+      }
       
       /** Update */
       // FIXME: type of entry should be ENTRY, but everything gets really complicated...
-      def apply(vi: Val[INT.type], entry: Val_): IndexCheck[Instance] = wrapIndexCheck(vi,
+      def apply(vi: Val[INT.type], entry: Val_): IndexCheck[StorageCheck] =
+        wrapIndexCheck(vi, wrapStorageCheck(entry, {entry:Entry =>
         vi match {
         case Val.Unknown(_) =>
-          val new_array = array ++
+          val new_array: Repr = array ++
             (for((k,v) <- array)
               yield (k,(v union entry).asInstanceOf[Entry]))
           // Merge a new default, as we could've assigned anywhere
@@ -359,16 +410,22 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
         case _ =>
           // Only handle possibly valid indices
           val is = vi.asSet filterNot {checkIndex(_) == Tri.F}
-          def validate(ret: GetResult) = ret match {
-            case None    => Val.Unknown(component_typ)
+          def validate(ret: GetResult): Entry = ret match {
+            case None    => Val.Unknown(component_typ).asInstanceOf[Entry]
             case Some(v) => v
           }
-          val new_array = array ++
-            (for(i <- is)
-              yield (i.asInstanceOf[INST[INT.type]].self,
-                     validate(apply(i).asInstanceOf[WithRet[GetResult]].ret) union entry))
+          type Ret = IndexCheck.WithRet[GetResult]
+          val new_entries =
+            for(i_ <- is;
+                i = i_.asInstanceOf[INST[INT.type]].self)
+              yield (i,
+                  // FIXME: May need to change if we eventually make use of programmer-defined default entries
+                  if(array contains i)
+                     (validate(apply(i).asInstanceOf[Ret].ret) union entry).asInstanceOf[Entry]
+                  else entry)
+          val new_array: Repr = array ++ new_entries
           clone(('array, new_array))(vi)
-        })
+        }}))
       }
       type Ref = Ref_
       val ref = new Ref(_)
@@ -429,6 +486,14 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
     final case class Within[R](override val ret:R) extends WithRet[R](ret)
     final case class Maybe[R](override val ret:R) extends WithRet[R](ret)
     final case object Outside extends IndexCheck[Nothing]
+  }
+  
+  sealed abstract class StorageCheck[+R]
+  object StorageCheck {
+    sealed abstract class WithRet[R](val ret: R) extends StorageCheck[R]
+    final case class OK[R](override val ret:R) extends WithRet[R](ret)
+    final case class Maybe[R](override val ret:R) extends WithRet[R](ret)
+    final case object Fail extends StorageCheck
   }
 }
 

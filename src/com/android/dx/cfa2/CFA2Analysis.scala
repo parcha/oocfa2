@@ -40,6 +40,7 @@ object CFA2Analysis {
     def loopingFuel: Int
     def outPath: String
     def continueOnOverflow = !debug
+    def arrayCovarianceBehavior: ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Warn
     
     lazy val extra_classpaths: Option[List[java.net.URL]] = None
     protected[CFA2Analysis] lazy val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
@@ -59,6 +60,13 @@ object CFA2Analysis {
     def loggers = log.logs.values
   }
   object Opts {
+    object ArrayCovarianceBehaviors extends Enumeration {
+      val Warn, // Warn and keep going assuming everything is fine
+          Mask // Mask it with an unknown value of the correct type
+          = Value
+    }
+    type ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Value
+    
     final class Loggers(val logs: Map[Symbol, Logger]) {
       def apply(l: Symbol) = logs(l)
     }
@@ -193,6 +201,7 @@ object CFA2Analysis {
   // Global, hackish convenience
   def log(sym:Symbol)(s:String) = singleton.opts.log(sym)(s)
   def logs = singleton.opts.logs
+  def debug = singleton.opts.debug
 }
 
 /**
@@ -596,7 +605,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                _eval_state: BBEvalState,
                _static_env: SFEnv, _tracef: TraceFrame, _heap: HeapEnv)
               (implicit cdeps: Val_): /*TailRec[*/Unit/*]*/ = {
-    log('debug) ("\nTracing BB "+bb+"@"+meth+" ["+_bbtracer.length+"]")
+    log('debug) (s"\n\nTracing BB $bb@$meth [${_bbtracer.length}]")
     
     val bbtracer = _bbtracer :+ bb
     log('debug) ("BBTracer: "+bbtracer)
@@ -648,8 +657,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     }
     
     @inline def lookup(reg:Var.Register_) : Val_ = tracef getOrElse (reg, {
-      log('debug) ("Failed to find value for "+reg)
-      Val.Unknown(reg.typ)
+      //log('debug) ("Failed to find value for "+reg)
+      //Val.Unknown(reg.typ)
+      throw InternalError(s"Failed to find value for $reg")
     })
     
     @inline def fsummarize_r(ret: RetVal) = summarize(meth, findex, bbtracer encode, ret)
@@ -662,8 +672,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !(ins.opcode.isInstanceOf[Branches] ||
-             ins.opcode.isInstanceOf[MayEnd])) /*try*/ {
-      log('debug) (ins toString)
+             ins.opcode.isInstanceOf[MayEnd])) try {
+      log('debug) (s"\n$ins")
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
        * TODO:
@@ -747,7 +757,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 case OBJECT_?(v: VAL[OBJECT]) => v match {
                   case Known_?(v)   => v~{_.apply(slot)}
                   case Unknown_?() =>
-                    log('debug) (s"Possible null pointer exception when getting slot $slot of $v")
+                    log('info) (s"Possible null pointer exception when getting slot $slot of $v")
                     npe = true
                     val field = v.typ.fieldSlots getOrRegister spec
                     Val.Unknown(field.typ)
@@ -778,14 +788,15 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 // Unknown for Object is actually also an Instance; since we're putting, it doesn't matter
                 case OBJECT_?(v: INST[OBJECT]) =>
                   if(+v.isNull) {
-                    log('debug) (s"Possible null pointer exception when putting field $field in $slot of $v")
+                    log('info) (s"Possible null pointer exception when putting field $field in $slot of $v")
                     npe = true
                   }
                   v ~~ (_.apply(slot, field))
               }
               if(npe) uncaught += Exceptionals.NULL_POINTER
               val new_obj = obj eval_ put_field
-              tracef = tracef +# (srcs(1), new_obj)
+              // FIXME: We don't need this because the heap gets updated, right...?
+              //tracef = tracef +# (srcs(1), new_obj)
             case PUT_STATIC =>
               val slot = liftSField(spec)
               static_env = static_env +# (new Var.MStaticF(spec), field)
@@ -811,7 +822,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 //case ARRAY_?(arr: INST[A]) =>
                 case arr: INST[A] =>
                   if(+arr.isNull) {
-                    log('debug) (s"Possible null pointer exception when getting at $index in array $arr")
+                    log('info) (s"Possible null pointer exception when getting at $index in array $arr")
                     npe = true
                   }
                   arr.~[resultT.type](get_)
@@ -827,7 +838,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 case Within(res) =>
                   get__(res).asInstanceOf[Val[resultT.type]]
                 case Maybe(res) =>
-                  log('debug) (s"Possible array-index-out-of-bounds exception when getting at $index in array $arr")
+                  log('info) (s"Possible array-index-out-of-bounds exception when getting at $index in array $arr")
                   oob = true
                   get__(res).asInstanceOf[Val[resultT.type]]
                 case Outside =>
@@ -840,6 +851,18 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               if(npe) uncaught += Exceptionals.NULL_POINTER
               if(oob) uncaught += Exceptionals.ARRAY_INDEX
               result = varray eval_ get
+            /*
+             * FIXME: Java arrays are covariant. This screws with EVERYTING.
+             * 
+             * We have to figure out how to deal with the fact that -- given imperfect ilk info --
+             * we may indeed introduce an invalid instance into an array. Later on, if someone
+             * gets that instance and tries to do something with it according to the array's type,
+             * we'll blow up somewhere unrelated in this evaluation. So pretty much ANY value-using
+             * operation -- which is to say EVERYTHING -- can arbitrarily fail.
+             * 
+             * As an interim solution, I've put in a flag which toggles what to do when
+             * we're uncertain whether a put is correct or not.
+             */
             case APUT =>
               val entry = operands(0)
               type A = ARRAY[_]
@@ -847,6 +870,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               val index = operands(2).asInstanceOf[Val[INT.type]]
               var npe = false
               var oob = false
+              var ase = false
               def put(arr:VAL[A]) : Val[A] = arr match {
                 case Null_?() =>
                   // FIXME: What if we are guaranteed an NPE?
@@ -857,31 +881,43 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 //case ARRAY_?(arr: INST[ARRAY[_]]) =>
                 case arr: INST[A] =>
                   if(+arr.isNull) {
-                    log('debug) (s"Possible null pointer exception when putting $entry at $index in array $arr")
+                    log('info) (s"Possible null pointer exception when putting $entry at $index in array $arr")
                     npe = true
                   }
                   arr.~[A](put_)
               }
-              // FIXME: Add checking for array-storage exception
-              def put_(arr:REF[A]) : Val[A] =
+              def put_(arr:REF[A]) : Val[A] = {
+                @inline def put__(check: arr.StorageCheck) = {
+                  import Instantiable.StorageCheck._
+                  check match {
+                  case OK(new_arr)    => Val.Atom(new_arr)
+                  case Maybe(new_arr) =>
+                    log('info) (s"Possible array-store exception when putting $entry at $index in array $arr")
+                    ase = true
+                    Val.Atom(new_arr)
+                  case Fail =>
+                    log('warn) (s"Found array-store exception when putting $entry at $index in array $arr")
+                    ase = true
+                    Val.Bottom
+                }}
                 arr(index, entry.asInstanceOf[arr.referee.typ.Entry]) match {
-                case Within(new_arr) =>
-                  Val.Atom(new_arr).asInstanceOf[Val[A]]
-                case Maybe(new_arr) =>
-                  log('debug) (s"Possible array-index-out-of-bounds exception when putting $entry at $index in array $arr")
+                case Within(check)  => put__(check)
+                case Maybe(check) =>
+                  log('info) (s"Possible array-index-out-of-bounds exception when putting $entry at $index in array $arr")
                   oob = true
-                  Val.Atom(new_arr).asInstanceOf[Val[A]]
+                  put__(check)
                 case Outside =>
                   // FIXME: What if we are guaranteed an OOB?
                   log('warn) (s"Found array-index-out-of-bounds exception when putting $entry at $index in array $arr")
                   oob = true
                   Val.Bottom
-              }
+              }}
               if(npe) uncaught += Exceptionals.NULL_POINTER
               if(oob) uncaught += Exceptionals.ARRAY_INDEX
+              if(ase) uncaught += Exceptionals.ARRAY_STORE
               val new_arr = varray eval_ put
-              // TODO: Is this correct?
-              tracef = tracef +# (srcs(0), new_arr)
+              // FIXME: See PUT_FIELD
+              //tracef = tracef +# (srcs(0), new_arr)
           }
         
         /** Monitor **/
@@ -901,14 +937,15 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             // Unknown for Object is actually also an Instance
             case OBJECT_?(v: INST[OBJECT]) =>
               if(+v.isNull) {
-                log('debug) (s"Possible null pointer exception when changing monitor on $v")
+                log('info) (s"Possible null pointer exception when changing monitor on $v")
                 npe = true
               }
               v ~~ (_.monitored = monitored)
           }
           if(npe) uncaught += Exceptionals.NULL_POINTER
           val new_obj = obj eval_ set_monitored
-          tracef = tracef +# (srcs(0), new_obj)
+          // FIXME: See PUT_FIELD
+          //tracef = tracef +# (srcs(0), new_obj)
         
         /** Allocation **/
         case code:Allocate =>
@@ -925,7 +962,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                     case Tri.T =>
                       Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
                     case Tri.U =>
-                      log('debug) (s"Possible negative array size exception when allocating new array of size $len")
+                      log('info) (s"Possible negative array size exception when allocating new array of size $len")
                       neg_len = true
                       Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
                     case Tri.F =>
@@ -1219,12 +1256,12 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       
     } // End eval
     /*catch {
-      case e:RuntimeException if !opts.debug => throw InternalError(e, s"@ Instruction $ins")
+      case e:RuntimeException if !opts.debug => throw InternalError(s"@ Instruction $ins", e)
     }*/
     
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast
-    log('debug) ("Ending on "+br.toHuman)
+    log('debug) (s"Ending on ${br.toHuman}")
     // We may be implicitly branching for a catch; get ready for a move-result-pseudo
     if(!br.opcode.isInstanceOf[Branches])
       update_pseudo(result)
