@@ -51,5 +51,5 @@ trait StringOpts {
     }
   
   protected def onConfigurationError(msg: String) =
-    throw new RuntimeException(msg)
+    throw new InternalError(msg)
 }

@@ -55,21 +55,21 @@ object Properties extends Enumeration {
 	    val bit = rawFlags & (1 << shift)
 	    if(shift <= maxId && bit != 0)
 	      toProp(bit) match {
-	        case None        => throw new RuntimeException //TODO: Better error
+	        case None        => throw new InternalError
 	        case Some(props) => props.size match {
-	          case 0 => throw new RuntimeException
+	          case 0 => throw new InternalError
 	          case 1 => builder += props.head
 	          case _ =>
 	            val inter = props & dom
 	            inter.size match {
 	              case 1 => builder += inter.head
-	              case _ => throw new RuntimeException
+	              case _ => throw new InternalError
 	            }
 	        }
 	      }
 	    else {
 	      // Unknown bits should be 0
-	      if(bit != 0) throw new RuntimeException //TODO: Better error
+	      if(bit != 0) throw new InternalError //TODO: Better error
 	    }
 	  }
 	  builder result

@@ -462,7 +462,7 @@ object Instantiable extends Registrar[Class[_], Instantiable] {
     def check(v:Any) = if(checker!=null) checker(v.asInstanceOf[T])
     // Left means we generated, right means we didn't
     def genDefault: Either[T, T] = default match {
-      case None => throw new RuntimeException
+      case None => throw new InternalError
       case Some(e) => e match {
         case Left(f) => Left(f())
         case Right(d) => Right(d)

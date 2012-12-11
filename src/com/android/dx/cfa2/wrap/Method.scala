@@ -20,7 +20,7 @@ sealed trait MethodDesc extends Immutable with NotNull {
     val pname = parent.typ.toHuman
     IDParsers.parse(IDParsers.meth_id, pname+"."+name) match {
       case IDParsers.Success(id, _) => id
-      case _ => throw new RuntimeException("Failure in parsing the method descriptor for "+pname+"."+name)
+      case _ => throw new InternalError(s"Failure in parsing the method descriptor for $pname.$name")
     }
   }
   

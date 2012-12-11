@@ -247,7 +247,7 @@ object ROpCodes extends Enumeration(1) {
       if(i < 0)       LT
       else if(i == 0) EQ
       else if(i > 0)  GT
-      else throw new RuntimeException
+      else throw new InternalError
   }
   val CMPL = new Comparison {
     import Comparison._
