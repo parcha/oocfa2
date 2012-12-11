@@ -6,6 +6,7 @@ import cfa2._
 import time._
 import `val`._
 import prop._
+import dx.rop.code.LocalItem
 
 /**
  * Leaf classes should be case classes based on src (or its components) such that
@@ -32,14 +33,33 @@ object Var {
       type Source = Reg
       def typ : Instantiable = Type(src.getType).asInstanceOf[Instantiable]
       
+      val localItem: Option[Local] = src.getLocalItem() match {
+        case null => None
+        case l    => Some(l)
+      }
+      
       // HACK: RegisterSpecs normally depend on their types as well, which would make them falsely unequal @_@
       override def equals(that: Any) = that match {
-        case that:Register[T] => that.src.getReg == this.src.getReg
+        case that:Register[T] => this.src.getReg == that.src.getReg
         case _ => super.equals(that)
       }
       override lazy val hashCode = src.getReg
+      override lazy val toString = localItem match {
+        case None    => super.toString
+        case Some(l) => super.toString + "\\" + l
+      }
     }
     type Register_ = Register[Instantiable]
+    implicit final class Local private[Var](private val raw: LocalItem) {
+      def name = raw.getName().getString()
+      def sig = raw.getSignature().getString()
+      override def toString = raw.toString
+      override def equals(that: Any) = that match {
+        case that:Local => this.raw == that.raw
+        case _          => super.equals(that)
+      }
+      override def hashCode = raw.hashCode
+    }
     
     /** Off the stack; used for function params */
     /*final case class Stack[+T <: Instantiable](val src: Method) extends Var[T] {

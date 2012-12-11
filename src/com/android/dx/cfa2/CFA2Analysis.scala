@@ -39,6 +39,7 @@ object CFA2Analysis {
     def recursionFuel: Int
     def loopingFuel: Int
     def outPath: String
+    
     def continueOnOverflow = !debug
     def arrayCovarianceBehavior: ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Warn
     
@@ -695,17 +696,25 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       if(cst != null)
         log('debug) ("Constant: "+cst)
       
-      val operands : IndexedSeq[Val_] = {
+      val (operands : IndexedSeq[Val_], locals : IndexedSeq[Option[Var.Local]]) = {
         val tmp = for(reg <- srcs) yield lookup(reg)
+        val locals = for(reg <- srcs) yield reg.localItem
         if(ins.opcode.hasMixedArity &&
            srcs.length < ins.opcode.maxArity) {
           // We are shy one parameter. It must be encoded as a constant.
           assert(cst != null)
-          tmp :+ liftConstant(cst)
+          (tmp :+ liftConstant(cst), locals :+ None)
         }
-        else tmp
+        else (tmp, locals)
       }
-      log('debug) ("Operands: "+operands)
+      log('debug) (s"Operands: $operands")
+      if(opts.debug && !locals.isEmpty && (locals exists {_ != None})) {
+        val names = for(l <- locals) yield l match {
+          case None    => "_"
+          case Some(l) => l.toString
+        }
+        log('debug) ("Names: "+names.mkString(", "))
+      }
       
       val sink = ins.result match {
         case null => None

@@ -20,7 +20,7 @@
 </listAttribute>
 <booleanAttribute key="org.eclipse.jdt.debug.ui.CONSIDER_INHERITED_MAIN" value="true"/>
 <stringAttribute key="org.eclipse.jdt.launching.MAIN_TYPE" value="com.android.dx.cfa2.test.ScalaExecutionHook"/>
-<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--optimize=devtest --scope=unit --no-locals --no-strict ${folder_prompt}"/>
+<stringAttribute key="org.eclipse.jdt.launching.PROGRAM_ARGUMENTS" value="--optimize=devtest --scope=unit --no-strict ${folder_prompt}"/>
 <stringAttribute key="org.eclipse.jdt.launching.PROJECT_ATTR" value="oocfa2-test"/>
 <stringAttribute key="org.eclipse.jdt.launching.VM_ARGUMENTS" value="-ea -Xmx1g -Xss2m&#10;-XX:+UseThreadPriorities&#10;-XX:+UseFastAccessorMethods&#10;-XX:+UseFastEmptyMethods&#10;-XX:+UseSSE42Intrinsics&#10;-XX:+UseCompressedOops&#10;-XX:+DoEscapeAnalysis"/>
 </launchConfiguration>
