@@ -11,7 +11,7 @@ import Properties._
 import parsers._
 import scala.collection._
 import java.lang.{Class => JClass}
-import java.lang.reflect.{Method => JMethod}
+import java.lang.reflect.{Member => JMember, Method => JMethod, Constructor => JConstructor}
 
 sealed trait MethodDesc extends Immutable with NotNull {
   def name: String
@@ -27,8 +27,14 @@ sealed trait MethodDesc extends Immutable with NotNull {
   final def arity: Int = argTs.size
   def argTs: Seq[Instantiable]
   def retT: Instantiable
+  final def exnTs: Option[Seq[Exceptional]] = exnCs match {
+    case None     => None
+    case Some(cs) =>
+      Some(for(c <- cs) yield Type(c).asInstanceOf[Exceptional]) 
+  }
   
   def argCs : Option[Seq[JClass[_]]]
+  def exnCs : Option[Seq[JClass[_]]]
   
   def reflection: Option[JMethod]
   /** Get the overload in klass that matches this method, if any **/
@@ -65,14 +71,8 @@ sealed trait MethodDesc extends Immutable with NotNull {
       return None
   }
   
-  val isFinal = reflection match {
-    case Some(refl) => Final.testJMember(refl)
-    case None       => Tri.U | ((parent is Final) == Tri.T)
-  }
-  val isIMethod: Tri = reflection match {
-    case Some(refl) => !Static.testJMember(refl)
-    case None       => Tri.U
-  }
+  final def isFinal = is(Final) | ((parent is Final) == Tri.T)
+  final def isIMethod = !is(Static)
   
   final def is(prop: Property) = {
     assert(Domain.Method contains prop)
@@ -131,7 +131,7 @@ sealed trait DalvikMethodDesc extends MethodDesc {
     if(_argCs contains None) None
     else Some(_argCs.flatten)
   /** More primitive argCs that lets one see which args in particular failed **/
-  final lazy val _argCs : immutable.Seq[Option[JClass[_]]] =
+  final lazy val _argCs : Seq[Option[JClass[_]]] =
     for(i <- 0 until arity;
         val t = prototype.getParameterTypes.get(i))
       yield
@@ -139,6 +139,11 @@ sealed trait DalvikMethodDesc extends MethodDesc {
           case null  => None
           case klass => Some(klass)
         }
+  final lazy val exnCs= reflection match {
+    case None       => None
+    case Some(refl) => Some(refl.getExceptionTypes().toSeq)
+  }
+  
   final lazy val reflection = parent.typ match {
     case typ:OBJECT => typ.klass match {
       case null => None
@@ -201,20 +206,34 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
   implicit def unwrap(gm:GhostMethod) = gm.spec
 }
 
-final case class ReflMethod private (private val refl: JMethod) extends MethodDesc {
-  def name = refl.getName
-  lazy val parent = ReflClass(refl.getDeclaringClass())
+sealed trait ReflMethodDesc extends MethodDesc {
+  protected val refl: JMember
+  final def name = refl.getName
+  final lazy val parent = ReflClass(refl.getDeclaringClass())
   
-  def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
+  final def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
+  
+  final lazy val props = Domain.Method.fromJMember(refl)
+  final def _is(prop) = props(prop)
+}
+
+final case class ReflMethod private (protected[this] val refl: JMethod) extends ReflMethodDesc {
   def retT = Type(refl.getReturnType()).asInstanceOf[Instantiable]
-  def argCs = Some(refl.getParameterTypes())
+  def argCs = Some(refl.getParameterTypes().toSeq)
+  def exnCs = Some(refl.getExceptionTypes())
   
   def reflection = Some(refl)
-  lazy val props = Domain.Method.fromJMember(refl)
-  def _is(prop: Property) = props(prop)
 }
 object ReflMethod extends Cacher[JMethod, ReflMethod] {
   private def intern(refl:JMethod) = cache.cache (refl, new ReflMethod(refl))
   implicit def wrap(refl:JMethod) = cache cachedOrElse (refl, intern(refl))
   implicit def unwrap(gm:ReflMethod) = gm.refl
+}
+
+final case class ReflConstructor private (protected[this] val refl: JConstructor[_]) extends ReflMethodDesc {
+  def retT = Type(refl.getDeclaringClass()).asInstanceOf[Instantiable]
+  def argCs = Some(refl.getParameterTypes())
+  def exnCs = Some(refl.getExceptionTypes())
+  
+  def reflection = None
 }

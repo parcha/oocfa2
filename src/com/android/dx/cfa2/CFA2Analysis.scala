@@ -1074,11 +1074,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             val result =
               if(hookRets isEmpty) Val.Unknown(mdesc.retT)
               else hookRets reduce (_ union _)
-            val uncaught: Set[Exceptional] = mdesc.reflection match {
+            val uncaught: Set[Exceptional] = mdesc.exnTs match {
               case None => immutable.Set(THROWABLE)
-              case Some(refl) => immutable.Set(
-                (for(klass <- refl.getExceptionTypes())
-                  yield Type(klass).asInstanceOf[Exceptional]):_*)
+              case Some(exns) => exns.toSet
             }
             eval_summary_(uncaught,
                           immutable.Set(RetVal.Return(result)))
