@@ -250,12 +250,14 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
       else ClassTag(component_typ.klass).wrap.runtimeClass
     
     protected override def << (t: Type) = t match {
-      case t:Array => component_typ < t.component_typ
-      case _ => Tri.F
+      case t:Array        => component_typ < t.component_typ
+      case _:OBJECT_.type => Tri.T
+      case _              => Tri.F
     }
     protected override def >> (t: Type) = t match {
-      case t:Array => component_typ > t.component_typ
-      case _ => Tri.F
+      case t:Array     => component_typ > t.component_typ
+      case _:NULL.type => Tri.T
+      case _           => Tri.F
     }
     
     final lazy val defaultInst = instance(Val.Bottom, ('isNull, Tri.T))
@@ -269,6 +271,14 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
      */
     instance_param_[VAL[INT.type]]('length, INT.unknown)
     instance_param_[Entry]('default, Val.Atom[component_typ.type](component_typ.defaultInst))
+    
+    import cfa2.wrap.MethodIDer
+    private[this] def _emulate_clone(r:Instance#Ref): VAL_ = r.emulate_clone
+    emulatedMethod_(MethodIDer.LaxlyBySignature("clone"), _emulate_clone _)
+    private[this] def _emulate_equals(r:Instance#Ref): REF_ => VAL_ =
+      (that:REF_) => r.emulate_equals(that.asInstanceOf[REF[this.type]])
+    emulatedMethod(MethodIDer.LaxlyBySignature("equals(Object)"),
+                   EmulatedMethod.RR_1(_emulate_equals _))
     
     protected[this] val constructor = new Instance(_, _)
     

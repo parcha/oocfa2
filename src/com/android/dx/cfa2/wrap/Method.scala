@@ -62,8 +62,8 @@ sealed trait MethodDesc extends Immutable with NotNull {
             return None
           // Hack until we can get the classloader to cooperate
           case e:NoClassDefFoundError =>
-            log('debug) (s"Classloader being uncooperative in reflection for $name in $klass along path $curr")
-            e.printStackTrace(logs('error).stream)
+            //log('error) (s"Classloader being uncooperative in reflection for $name in $klass along path $curr")
+            //e.printStackTrace(logs('error).stream)
             return None
         }
       }
@@ -145,7 +145,8 @@ sealed trait DalvikMethodDesc extends MethodDesc {
   }
   
   final lazy val reflection = parent.typ match {
-    case typ:OBJECT => typ.klass match {
+    // Arrays can have methods, too
+    case typ:RefType => typ.klass match {
       case null => None
       case klass => matchingOverload(klass)
     }

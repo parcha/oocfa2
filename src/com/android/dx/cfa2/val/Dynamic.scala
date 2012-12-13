@@ -47,7 +47,10 @@ extends OBJECT(raw) with Reflected[ET] {
         assert(self.hashCode == hash)
         ret
       }
-      Val.eval(g)(vargs:_*)
+      if(vargs.isEmpty)
+        Val.Atom(g(Seq()))
+      else
+        Val.eval(g)(vargs:_*)
     }
     }
     final type Ref = Ref_
@@ -80,17 +83,26 @@ object Dynamic {
     val retT = Reflected(m.getReturnType).get
     type Args = Seq[VAL[Reflected[_]]]
     def f(_args: Args) : VAL[retT.type] = {
-      if(_args exists (_.isUnknown))
-        return retT unknown Val(_args:_*)
       val args = _args.asInstanceOf[Seq[INST[Reflected_]]]
-      val args_ = for(v <- args) yield v.asInstanceOf[v.typ.Instance].self.asInstanceOf[Object]
-      val ret: retT.EigenType =
-        if(isStatic)
-          m.invoke(null, args_ :_*).asInstanceOf[retT.EigenType]
-        else
-          m.invoke(args_.head, args_.tail :_*).asInstanceOf[retT.EigenType]
       val deps = Val(args:_*)
-      return retT instance(ret, deps)
+      lazy val unknown = retT unknown deps 
+      if(_args exists (_.isUnknown))
+        return unknown
+      val args_ = for(v <- args) yield v.asInstanceOf[v.typ.Instance].self.asInstanceOf[Object]
+      try {
+        val ret: retT.EigenType =
+          if(isStatic)
+            m.invoke(null, args_ :_*).asInstanceOf[retT.EigenType]
+          else
+            m.invoke(args_.head, args_.tail :_*).asInstanceOf[retT.EigenType]
+        return retT instance(ret, deps)
+      }
+      catch {
+        case e:IllegalArgumentException =>
+          CFA2Analysis.log('warn) (s"IllegalArgumentException when trying to lift call on $m using $vargs")
+          e.printStackTrace(CFA2Analysis.logs('warn).stream)
+          return unknown
+      }
     }
     return f
   }

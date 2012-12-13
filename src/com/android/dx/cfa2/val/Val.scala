@@ -24,9 +24,9 @@ extends Immutable with Serializable with NotNull{
     Val.union(this, that)
   
   final def eval [ArgT >: Type <: Instantiable, RetT <: Instantiable]
-                 (f: VAL[ArgT]=>VAL[RetT]) : Val[RetT] = {
+                 (f: VAL[ArgT]=>VAL[RetT], untyped:Boolean=false) : Val[RetT] = {
     val rets = for(arg <- asSet) yield f(arg)
-    Val(rets)
+    Val(rets, untyped)
   }
   final def eval_ [ArgT >: Type <: Instantiable, RetT <: Instantiable]
                   (f: VAL[ArgT]=>Val[RetT]) : Val[RetT] = {

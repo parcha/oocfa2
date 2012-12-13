@@ -26,7 +26,7 @@ abstract case class Type private[`val`] (val raw:RawType) extends Immutable with
   import Type._
   //if(!(this eq Type.BOTTOM)) {
     require(raw != null)
-    require(!isRegistered(raw))
+    require(!isRegistered(raw), s"Attempted to register $raw twice!")
 	register(raw, this)
   //}
   
@@ -115,7 +115,15 @@ object Type extends Registrar[RawType, Type] {
   implicit def wrap(raw: RawType) = intern(raw)
   implicit def unwrap(t: Type) = t.raw
   
+  // Fast-path intern for the common case of the type being registered
   private def intern(raw:RawType) : Type = registry registered raw match {
+    case Is(t)     => t
+    case Was | Not =>
+      // Synchronize around the raw type in case we need to insert
+      raw.synchronized { _intern(raw) }
+  }
+  // Slower-path when we might need to insert
+  private def _intern(raw:RawType) : Type = registry registered raw match {
     case Is(t) => t
     case Was   =>
       log('warn) ("Previously registered type for "+ raw +" now unreferenced")

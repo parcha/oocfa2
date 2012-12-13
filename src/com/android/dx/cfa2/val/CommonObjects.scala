@@ -22,27 +22,16 @@ object OBJECT_ extends OBJECT(RawType.OBJECT) {
   type Instance = Instance_
 }
 
-object CLASS extends OBJECT(RawType.CLASS) {
-  protected val constructor = new Instance(_, _)
-  instance_param[String]('desc)
-  // TODO: make use of first-class Class reflection
-  instance_param_[Class[_]]('self, null)
-  protected[this] final class Instance_(params: IParams, deps:Val_)
-  extends super.Instance_(params, deps) {
-    lazy val desc = param[String]('desc)
-    protected[this] final class Ref_(env: HeapEnv) extends super.Ref_(env)
-    type Ref = Ref_
-    protected[this] val ref = new Ref(_)
-  }
-  type Instance = Instance_
-}
-
 /******* Dynamised types *************/
 import java.{lang => J}
 import java.{math => M}
 
 object STRING extends Dynamic[J.String](RawType.STRING) {
-  protected[this] val default = new String
+  protected[this] lazy val defaultSelf = Some(new String)
+}
+
+object CLASS extends Dynamic[J.Class[_]](RawType.CLASS) {
+  protected[this] lazy val defaultSelf = None
 }
 
 // FIXME: These objects have no real defaults! The premise of reflection/dynamics is broken!

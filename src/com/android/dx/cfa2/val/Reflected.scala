@@ -20,11 +20,15 @@ trait Reflected[ET] extends Instantiable with DelayedInit {
   register(EigenType_, this)
   
   // Just a default
-  def instance(self:EigenType, deps: Val_) : Instance = constructor(paramify(('self, self)), deps)
+  def instance(self:EigenType, deps: Val_) : Instance = constructor(paramify(('self, Some(self))), deps)
   final def instance(self:EigenType) : Instance = instance(self, Val.Bottom)
   implicit final def deconstruct(inst: Self#Instance) = inst.self
   
-  protected[this] val default: ET
+  /**
+   * Default, convenience value of EigenType; i.e. what you'd get from a nullary constructor
+   * Set to None if there is no such value
+   **/
+  protected[this] def defaultSelf: Option[ET]
   
   // Hack for proper initialization; really just want this one clause to be executed after
   // all other initialization phases, but without the if-statement, this would be executed
@@ -33,11 +37,13 @@ trait Reflected[ET] extends Instantiable with DelayedInit {
   //super.delayedInit(body)
   body
   if(!isIParamRegistered('self)) {
-    instance_param_[ET]('self, default, {_!=null})
+    instance_param_[Option[ET]]('self, defaultSelf, {_!=null})
   }
   }
   protected[this] trait Instance_ extends super.Instance_ { _:Instance =>
-    final lazy val self = param[ET]('self) 
+    // We should not attempt to use self if there is not actually a self (e.g. unknown)
+    final lazy val _self = param[Option[ET]]('self)
+    final lazy val self = _self.get 
   }
   type Instance <: Instance_
 }

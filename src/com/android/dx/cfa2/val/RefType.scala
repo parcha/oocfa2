@@ -6,6 +6,7 @@ import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
 import env._
 import `var`._
+import wrap.{MethodIDer, MethodDesc}
 
 import scala.collection._
 import scala.reflect.classTag
@@ -15,7 +16,52 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
   //require(raw isReference)
   
   instance_param_[Tri]('isNull, Tri.F)
+  // TODO: Types with interned values, like Classes, will need to emulate interning
   instance_param__[Long]('heapToken, ()=>nextHeapToken)
+  
+  sealed trait EmulatedMethod {
+    type EM <: AnyRef
+    val em: EM
+  }
+  object EmulatedMethod {
+    final case class R_0(em:Instance#Ref => VAL_) extends EmulatedMethod {
+      type EM = Instance#Ref => VAL_
+    }
+    final case class R_1(em:Instance#Ref => VAL_ => VAL_) extends EmulatedMethod {
+      type EM = Instance#Ref => VAL_ => VAL_
+    }
+    final case class R_N(em:Instance#Ref => Seq[VAL_] => VAL_) extends EmulatedMethod {
+      type EM = Instance#Ref => Seq[VAL_] => VAL_
+    }
+    final case class RR_1(em:Instance#Ref => REF_ => VAL_) extends EmulatedMethod {
+      type EM = Instance#Ref => REF_ => VAL_
+    }
+  }
+  // TODO: Perhaps come up with a better key...
+  private[this] final val emulatedMethodRegistry: mutable.Map[MethodIDer, EmulatedMethod] = mutable.Map()
+  
+  /** Subclasses should use this declarative API to denote emulated methods they provide **/
+  protected[this] final def emulatedMethod(ider:MethodIDer, m:EmulatedMethod): Unit =
+    emulatedMethodRegistry += ((ider, m))
+  protected[this] final def emulatedMethod_(ider:MethodIDer, m: Instance#Ref => VAL_): Unit =
+    emulatedMethod(ider, EmulatedMethod.R_0(m))
+  protected[this] final def emulatedMethod__(ider:MethodIDer, m: Instance#Ref => VAL_ => VAL_): Unit =
+    emulatedMethod(ider, EmulatedMethod.R_1(m))
+  
+  // TODO: We may wish to sanity-check whether there's only one identified possibility
+  final def emulatedMethod(m: MethodDesc): Option[EmulatedMethod] = {
+    def identifies(ider: MethodIDer) = (ider identifies m) == Tri.T
+    val ider = emulatedMethodRegistry.keys find {identifies}
+    ider match {
+      case None       => None
+      case Some(ider) => emulatedMethodRegistry get ider
+    }
+  }
+  
+  private[this] def _emulate_getClass(r:Instance#Ref) = r.emulate_getClass
+  emulatedMethod_(MethodIDer.LaxlyBySignature("getClass"), _emulate_getClass _)
+  
+  // TODO: Emulated equals can be used if it's never been overridden
   
   abstract class Instance_(params: IParams, deps:Val_)
   extends super.Instance_(params, deps) { self :Instance =>
@@ -29,9 +75,15 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
     final def refEq(that: RefType#Instance) : Tri =
       if((this.isNull & that.isNull)==Tri.T) true
       else if((this.isNull ^ that.isNull)==Tri.T) false
-      else if(this.isUnknown || that.isUnknown) Tri.U // TODO: Use alias analysis heuristics like TBAA
+      else if(this.isUnknown || that.isUnknown) {
+        // TBAA
+        this.typ < that.typ match {
+          case Tri.T | Tri.U => Tri.U
+          case Tri.F => Tri.F
+        }
+      }
       else heapToken == that.heapToken
-    
+      
     /**
      * This encapsulates all access to the instance via a reference hook so that
      * e.g. a newer version of this instance can be found in the environment.
@@ -58,6 +110,26 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
         clone(('monitored, b))(Val.Atom(vb))
       }
       
+      /* Emulated default Object-level methods */
+      /** Be careful to actually dereference "that" first, so that you get proper dep tracking! **/
+      def emulate_equals(_that: Instance#Ref) = {
+        val that = _that.referee
+        refEq(that) match {
+          // TODO: Is it really the case that for T the Val deps can be typed?
+          case Tri.T => BOOLEAN.true_(Val(self, that))
+          case Tri.U => BOOLEAN.unknown(Val(true, Val(self), Val(that)))
+          case Tri.F => BOOLEAN.false_(Val(true, Val(self), Val(that)))
+        }
+      }
+      final def emulate_getClass = klass match {
+        case null  => CLASS.unknown(Val(self))
+        case klass => CLASS.instance(klass, Val(self))
+      }
+      /** Emulate clone by shallow-cloning all fields, except reference-related ones **/
+      def emulate_clone = clone(('heapToken, nextHeapToken),
+                                ('monitored, false),
+                                ('isNull, Tri.F))()
+      
       // Forwarded methods from Instantiable.Instance
       @inline
       protected[this] final def clone(_params: (Symbol, Any)*)(extraDeps: Val_ *) : Instance =
@@ -74,7 +146,7 @@ abstract class RefType protected[`val`] (raw:RawType) extends Instantiable(raw) 
     /** Ref constructor; subclasses should specify their actual, final Ref */
     protected[this] val ref : HeapEnv => Ref
     // TODO: HACK
-    protected lazy val rawRef = new Var.RawHeap(heapToken){}//{ type Source = Null; val src = null }
+    protected lazy val rawRef = new Var.RawHeap(heapToken){}
     /** "Dereference"; gets most up-to-date version(s) */
     final def unary_~(implicit env: HeapEnv) : Val[typ.type] = env.get(rawRef) match {
       case None       => Val.Atom(self).asInstanceOf[Val[typ.type]]
@@ -118,7 +190,6 @@ object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
    *  non-primitives, and hence RefTypes
    */
   protected override def << (t: Type) = super.<<(t) | t.isInstanceOf[RefType]
-  // TODO: Should this be Tri.U instead? Does JVM have nulls which can supertype?
   protected override def >> (t: Type) = super.>>(t) | false
   
   val singleton = Instance_

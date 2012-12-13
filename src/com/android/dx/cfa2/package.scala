@@ -18,8 +18,13 @@ package object cfa2 {
     case c:CstFloat     => Val.Atom(FLOAT.instance(c.getValue))
     case c:CstDouble    => Val.Atom(DOUBLE.instance(c.getValue))
     case c:CstString    => Val.Atom(STRING.instance(c.getString))
-    case c:CstType      => Val.Atom(CLASS.instance(Val.Bottom, ('desc, c.getDescriptor.getString)))
     case c:CstKnownNull => Val.Atom(NULL.singleton)
+    case c:CstType      =>
+      val v = Type(c.getClassType).asInstanceOf[Instantiable].klass match {
+        case null  => CLASS.unknown(Val.Bottom)
+		case klass => CLASS.instance(klass)
+      }
+      Val.Atom(v)
   }
   }
   

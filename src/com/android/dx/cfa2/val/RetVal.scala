@@ -13,7 +13,7 @@ object RetVal {
     def union[RV <: RetVal](other: RV) = other match {
       case Return(v)     =>
         if(v == rv) this
-        else Return(rv.union(v).asInstanceOf[Val[Returnable]])
+        else Return(Val(true, rv, v))
       case Throw(ev) => Dual(rv, ev)
       case d:Dual_  => d union this
     }
@@ -27,7 +27,7 @@ object RetVal {
       case Return(rv)       => Dual(rv, ev)
       case Throw(v) =>
         if(v == ev) this
-        else Throw(ev.union(v).asInstanceOf[Val[Exceptional]])
+        else Throw(Val(true, ev, v))
       case d:Dual_   => d union this
     }
   }
@@ -36,9 +36,9 @@ object RetVal {
   final case class Dual[T <: Returnable, E <: Exceptional] private[RetVal]
                        (rv: Val[T], ev: Val[E]) extends RetVal with WithReturn[T] with WithThrow[E] {
     def union[RV <: RetVal](other: RV) = other match {
-      case Return(v)      => Dual(rv union v, ev)
-      case Throw(v) => Dual(rv, (ev union v).asInstanceOf[Val[Exceptional]])
-      case Dual(rv_, ev_) => Dual(rv union rv_, (ev union ev_).asInstanceOf[Val[Exceptional]])
+      case Return(v)      => Dual(Val(true, rv, v), ev)
+      case Throw(v) => Dual(rv, Val(true, ev, v))
+      case Dual(rv_, ev_) => Dual(Val(true, rv, rv_), Val(true, ev, ev_))
     }
   }
   type Dual_ = Dual[Returnable, Exceptional]

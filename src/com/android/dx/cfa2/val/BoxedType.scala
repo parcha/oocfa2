@@ -29,7 +29,10 @@ object BoxedType {
   sealed abstract class BoxedValuedType[V <: AnyRef, T <: ValuedType[_]] protected
   (raw:RawType, val containedType: T)(implicit V_ : ClassTag[V])
   // FIXME: Dynamics are actually broken for all object types but strings
-  extends Dynamic[V](raw)(V_) with BoxedType[T]
+  extends Dynamic[V](raw)(V_) with BoxedType[T] {
+    protected[this] val default: V
+    protected[this] def defaultSelf = Some(default)
+  }
   
   import java.{lang => J}
   object BOOLEAN extends BoxedValuedType[J.Boolean, `val`.BOOLEAN.type](RawType.BOOLEAN_CLASS, `val`.BOOLEAN) {

@@ -295,7 +295,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   }
   protected[cfa2] final val reflMethodMap = {
     val build = {
-      type Builder = mutable.MapBuilder[JMethod, Method, par.immutable.ParMap[JMethod, Method]]
+      type Builder = mutable.MapBuilder[JMethod, DalvikMethodDesc, par.immutable.ParMap[JMethod, Method]]
       new Builder(par.immutable.ParMap())
     }
     for(m <- methodMap.keys)
@@ -492,6 +492,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                            "Consider increasing the JVM's stack size with -Xss#")
               e.printStackTrace(opts.logs('error).stream)
               if(!opts.continueOnOverflow) throw e
+            case e:InternalError =>
+              log('error) ("Internal error: "+e)
+              e.printStackTrace(opts.logs('error).stream)
           }
           eval_worklist(m) = true
       } 
@@ -1162,11 +1165,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               update_retval(Dynamic.liftStaticCall(mdesc, operands:_*))
             }
             else call(mdesc)
-          @inline
-          def invoke_virtual() = invoke_dispatch(false)
-          @inline
-          def invoke_super() = invoke_dispatch(true)
+          @inline def invoke_virtual() = invoke_dispatch(false)
+          @inline def invoke_super() = invoke_dispatch(true)
           
+          // FIXME: Arrays can indeed be used in rare situations; where they use Object methods
           @inline
           def invoke_dispatch(sup: Boolean) = {
             val vobj = operands.head.asInstanceOf[Val[OBJECT]]
@@ -1201,7 +1203,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               }
             }
             val vmeths = vobj.asSet groupBy getVMeth
-            log('debug) (s"Resolved to ${vmeths.size} vmeths: ${vmeths.keys}")
+            if(opts.debug) {
+              val withoutGhost = vmeths filter {_._1 == ghost}
+              log('debug) (s"Resolved to ${withoutGhost.size} vmeths: ${withoutGhost.keys}")
+            }
             // Dispatch based on virtual method
             // FIXME: This CANNOT use a parallel collection unless OOCFA2 as a whole is threadsafe!
             for((mdesc, objs) <- vmeths.seq.toSeq.sortBy{_._1}; // Sort to give some determinism
@@ -1211,16 +1216,15 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           
           @inline
           def invoke_direct(mdesc: MethodDesc, _vobj: Val[OBJECT]) = {
-            val typ = mdesc.parent.typ.asInstanceOf[OBJECT]
+            val typ = mdesc.parent.typ.asInstanceOf[RefType]
             val vobj = _vobj.asInstanceOf[Val[typ.type]]
             // TODO: Since the verifier has run, it must be true that all types of vobj are subtypes of typ;
             // We could perhaps harness this information...
-            //assert(vobj.asSet forall (_.typ < typ == Tri.T))
             
-            // Can we dynamically lift this method?
-            if(Dynamic.isLiftableCall(mdesc, vobj, operands.tail:_*)) {
+            @inline def invoke_dynamic() = {
               log('debug) ("Lifting instance call to "+mdesc)
-              val typ_ = typ.asInstanceOf[typ.type with Dynamic[_]]
+              val typ_ = typ.asInstanceOf[OBJECT with Dynamic[_]]
+              val vobj_ = vobj.asInstanceOf[Val[typ_.type]]
               val vargs = operands.tail.asInstanceOf[Seq[Val[`val`.Reflected[_]]]]
               @inline
               def call_dynamic(obj: typ_.Instance) = {
@@ -1228,10 +1232,47 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 def f(ref: typ_.Instance#Ref) = (ref\mdesc)(vargs:_*)
                 obj~f
               }
-              val ret = vobj eval_ ((obj:VAL[OBJECT]) => call_dynamic(obj.asInstanceOf[typ_.Instance]))
+              val ret = vobj_ eval_ ((obj:VAL[OBJECT]) => call_dynamic(obj.asInstanceOf[typ_.Instance]))
               update_retval(ret)
             }
-            else call(mdesc)
+            
+            @inline def emulate_0(em: typ.EmulatedMethod.R_0#EM) = {
+              @inline def emulate(v: VAL[RefType]) = v.asInstanceOf[INST[typ.type]] ~~ em
+              vobj eval_ emulate
+            }
+            
+            @inline def emulate_1(em: typ.EmulatedMethod.R_1#EM) = {
+              val varg = operands.tail(0)
+              @inline def emulate(v: VAL[RefType]) = v.asInstanceOf[INST[typ.type]] ~ emulate_
+              @inline def emulate_(r: REF[typ.type]) = varg eval {(arg:VAL_)=>em(r)(arg)}
+              vobj eval_ emulate
+            }
+            
+            @inline def emulate_r1(em: typ.EmulatedMethod.RR_1#EM) = {
+              val varg = operands.tail(0)
+              @inline def emulate(v: VAL[RefType]) = v.asInstanceOf[INST[typ.type]] ~ emulate_
+              @inline def emulate_(r: REF[typ.type]) =
+                varg eval_ {arg:VAL_ => arg.asInstanceOf[INST[RefType]] ~~ {rarg:REF_ => em(r)(rarg)}}
+              vobj eval_ emulate
+            }
+            
+            // Can we emulate this method?
+            import typ.EmulatedMethod._
+            typ.emulatedMethod(mdesc) match {
+              case None =>
+                // Can we dynamically lift this method?
+                if(Dynamic.isLiftableCall(mdesc, vobj, operands.tail:_*))
+                  invoke_dynamic()
+                // Fall back to abstract interpretation
+                else call(mdesc)
+              case Some(choice) =>
+                val ret = choice match {
+                  case R_0(em) => emulate_0(em)
+                  case R_1(em) => emulate_1(em)
+                  case RR_1(em) => emulate_r1(em)
+                }
+                update_retval(ret)
+            }
           }
           
           code match {
@@ -1251,7 +1292,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           case Unknown_?() => v
           case Known_?(v)  => v.clone(cdeps)
         }
-        tracef = tracef +# (sink.get, result eval dependize[Instantiable])
+        tracef = tracef +# (sink.get, result.eval(dependize[Instantiable], true))
       }
       /*
        *  Even if it's NoResult, we may propagate the result via eval_state.pseudo, i.e.
@@ -1264,9 +1305,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           uncaught += Type(ins.operation.exceptionTypes.getType(i)).asInstanceOf[Exceptional]
       
     } // End eval
-    /*catch {
-      case e:RuntimeException if !opts.debug => throw InternalError(s"@ Instruction $ins", e)
-    }*/
+    catch {
+      case e:UnimplementedOperationException => throw e
+      //case e:RuntimeException /*if !opts.debug*/ => throw InternalError(s"@ Instruction $ins", e)
+    }
     
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast
@@ -1481,10 +1523,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 }
                 // TODO: do the same for static env
                 var tracef: TraceFrame = tracef_ +# (srcs(0), Val(vset1))
-                var cdeps_ = Val(vset1) union cdeps
+                var cdeps_ = Val(true, Val(vset1), cdeps)
                 if(operands.length == 2) {
                   tracef = tracef +# (srcs(1), Val(vset2))
-                  cdeps_ = Val(vset2) union cdeps
+                  cdeps_ = Val(true, Val(vset2), cdeps)
                 }
                 BranchMonad(tracef, cdeps_)
               }

@@ -22,6 +22,7 @@ package object `val` {
   type INST_ = INST[Instantiable]
   
   type REF[T <: RefType] = INST[T]#Ref
+  type REF_ = REF[RefType]
   
   type SUBV[+T <: Instantiable] = V forSome {type V <: VAL[T]}
   type SUPV[-T <: Instantiable] = V forSome {type V >: VAL[T]}

@@ -21,10 +21,11 @@ object VOID extends Instantiable(RawType.VOID) with PrimitiveType with Singleton
 sealed abstract class ValuedType[V <: AnyVal] protected[`val`] (raw:RawType)(implicit val EigenType_ : ClassTag[V])
 extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBeParam {
   protected[this] val default: V
-  lazy val defaultInst = constructor(paramify(('self, default)), Val.Bottom)
+  protected[this] def defaultSelf = Some(default)
+  lazy val defaultInst = constructor(paramify(('self, defaultSelf)), Val.Bottom)
   final override def instance(deps: Val_, params: IParams) = {
     require(params contains 'self, params.size==1)
-    cacheHook(params('self).asInstanceOf[V], deps) match {
+    cacheHook(params('self).asInstanceOf[Option[V]].get, deps) match {
       case None        => super.instance(deps, params)
       case Some(cache) => cache 
     }
@@ -46,8 +47,8 @@ extends Instantiable(raw) with PrimitiveType with Reflected[V] with Type.CanBePa
 object BOOLEAN extends ValuedType[Boolean](RawType.BOOLEAN) {
   //protected val _V = manifest[Boolean].erasure
   protected[this] val default = false
-  protected def true_(deps: Val_) = instance(true, deps)
-  protected def false_(deps: Val_) = instance(false, deps)
+  def true_(deps: Val_) = instance(true, deps)
+  def false_(deps: Val_) = instance(false, deps)
   val TRUE  = true_(Val.Bottom)
   lazy val FALSE = defaultInst
   override protected[this] def cacheHook(self) = self match {

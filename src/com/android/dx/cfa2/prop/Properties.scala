@@ -17,7 +17,6 @@ object Properties extends Enumeration {
     // TODO: Give this a more proper type
     private lazy val byBits = {
       val build = new MutableConcurrentMultiMap[Int, Property]
-      val map = new MutableConcurrentMultiMap[Int, Property]
       for(v <- values) {
         val prop = v.asInstanceOf[Property]
         build += (prop.bitfield, prop) 
@@ -55,7 +54,7 @@ object Properties extends Enumeration {
 	    val bit = rawFlags & (1 << shift)
 	    if(shift <= maxId && bit != 0)
 	      toProp(bit) match {
-	        case None        => throw new InternalError
+	        case None        => throw new InternalError(s"Could not find $bit in $byBits")
 	        case Some(props) => props.size match {
 	          case 0 => throw new InternalError
 	          case 1 => builder += props.head
