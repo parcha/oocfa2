@@ -20,9 +20,16 @@ extends URLClassLoader(urls.toArray, parent) {
         warn("In attempting to load "+name+" for reflection, a depedency could not be found: "+e.getMessage)
         None
     }
-  def reflectClass(dalvikType: DType) : Option[JClass[_]] = {
-    val descriptorMatch = (descriptorRegex findFirstMatchIn dalvikType.getDescriptor).get
-    reflectClass(descriptorMatch.group("classname").replace('/', '.'))
+  def reflectClass(dalvikType: DType) : Option[JClass[_]] = reflectClassDescriptor(dalvikType.getDescriptor)
+  def reflectClassDescriptor(desc: String) : Option[JClass[_]] = {
+    val descriptorMatch = (descriptorRegex findFirstMatchIn desc).get
+    descriptorMatch.group("classname") match {
+      case null =>
+        CFA2Analysis.log('debug) (s"No classname found for descriptor ${desc}")
+        None
+      case cname =>
+        reflectClass(cname.replace('/', '.'))
+    }
   }
   
   private[cfa2] def +=(url: URL) = super.addURL(url)

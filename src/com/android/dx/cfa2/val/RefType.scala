@@ -211,8 +211,7 @@ object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
  * artificially subtype all the ref types.
  */
 abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
-  final val className = descriptorMatch.group("classname").replace('/', '.')
-  val klass = BuiltinAnalysisClassLoader.reflectClass(className) match {
+  val klass = BuiltinAnalysisClassLoader.reflectClassDescriptor(descriptor) match {
     case None    => null
     case Some(c) => c
   }

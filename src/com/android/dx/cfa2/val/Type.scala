@@ -31,7 +31,6 @@ abstract case class Type private[`val`] (val raw:RawType) extends Immutable with
   //}
   
   def descriptor = raw.getDescriptor
-  protected[this] val descriptorMatch = (descriptorRegex findFirstMatchIn descriptor).get
   lazy val name = raw.toHuman()
   
   private final val liftedClass = this match {
