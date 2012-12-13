@@ -41,6 +41,7 @@ object CFA2Analysis {
     def outPath: String
     
     def continueOnOverflow = !debug
+    def continueOnInternalError = !debug
     def arrayCovarianceBehavior: ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Warn
     
     lazy val extra_classpaths: Option[List[java.net.URL]] = None
@@ -492,7 +493,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                            "Consider increasing the JVM's stack size with -Xss#")
               e.printStackTrace(opts.logs('error).stream)
               if(!opts.continueOnOverflow) throw e
-            case e:InternalError =>
+            case e:InternalError if opts.continueOnInternalError =>
               log('error) ("Internal error: "+e)
               e.printStackTrace(opts.logs('error).stream)
           }
@@ -1307,7 +1308,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     } // End eval
     catch {
       case e:UnimplementedOperationException => throw e
-      //case e:RuntimeException /*if !opts.debug*/ => throw InternalError(s"@ Instruction $ins", e)
+      case e:RuntimeException if opts.continueOnInternalError => throw InternalError(s"@ Instruction $ins", e)
+      case e:Error if opts.continueOnInternalError => throw InternalError(s"@ Instruction $ins", e)
     }
     
     // Handle last instruction, which branches
