@@ -53,8 +53,8 @@ object CFA2Analysis {
     
     private[this] lazy val debugLog = new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))
     protected[this] def _logs = immutable.Map(
-      mkLog('out, new PrintLogger(System.out)),
-      // FIXME: Hack to get info and warn streams interleaved into debug
+      // FIXME: Hack to get other streams interleaved into debug
+      mkLog('out, new DualLogger(new PrintLogger(System.out), debugLog)),
       mkLog('info, new DualLogger(new PrintLogger(System.err), debugLog)),
       mkLog('warn, new DualLogger(new PrintLogger(System.err), debugLog)),
       ('debug, debugLog),
@@ -274,6 +274,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   Runtime.getRuntime().addShutdownHook(new Thread {
     override def run() = opts.loggers map {_.finish()}
   })
+  
+  /** Provides a means to stop the evaluation of a path if it is fruitless **/
+  protected[this] final object EscapeHatch extends Exception
   
   import opts.log
   
@@ -496,6 +499,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             case e:InternalError if opts.continueOnInternalError =>
               log('error) ("Internal error: "+e)
               e.printStackTrace(opts.logs('error).stream)
+            case e:RuntimeException if opts.continueOnInternalError =>
+              log('error) ("Runtime exception: "+e)
+              e.printStackTrace(opts.logs('error).stream)
           }
           eval_worklist(m) = true
       } 
@@ -674,12 +680,11 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     
     var result :Val_ = Val.Bottom
     val insns = bb.getInsns
-    breakable {
     // All but the branching instruction
     for(index <- 0 until insns.size;
         ins: Instruction = insns.get(index)
         if !(ins.opcode.isInstanceOf[Branches] ||
-             ins.opcode.isInstanceOf[MayEnd])) try {
+             ins.opcode.isInstanceOf[MayEnd])) breakable { try {
       log('debug) (s"\n$ins")
       /**
        * Much of the info this is based off of was gleaned from Rops.ropFor and/or experimentation
@@ -765,7 +770,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               var npe = false
               def get_field(v:VAL[RefType]) : Val_ = v match {
                 case Null_?() =>
-                  // FIXME: What if we are guaranteed an NPE?
                   log('warn) (s"Found null pointer exception when getting slot $slot of $v")
                   npe = true
                   Val.Bottom
@@ -796,7 +800,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               var npe = false
               def put_field(v:VAL[RefType]) : Val[OBJECT] = v match {
                 case Null_?() =>
-                  // FIXME: What if we are guaranteed an NPE?
                   log('warn) (s"Found null pointer exception when putting field $field in $slot of $v")
                   npe = true
                   Val.Bottom
@@ -810,6 +813,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               }
               if(npe) uncaught += Exceptionals.NULL_POINTER
               val new_obj = obj eval_ put_field
+              if(new_obj == Val.Bottom) throw EscapeHatch
               // FIXME: We don't need this because the heap gets updated, right...?
               //tracef = tracef +# (srcs(1), new_obj)
             case PUT_STATIC =>
@@ -829,7 +833,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               var oob = false
               def get(arr:VAL[A]) : Val[resultT.type] = arr match {
                 case Null_?() =>
-                  // FIXME: What if we are guaranteed an NPE?
                   log('warn) (s"Found null pointer exception when getting at $index in array $arr")
                   npe = true
                   Val.Bottom
@@ -857,7 +860,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   oob = true
                   get__(res).asInstanceOf[Val[resultT.type]]
                 case Outside =>
-                  // FIXME: What if we are guaranteed an OOB?
                   log('warn) (s"Found array-index-out-of-bounds exception when getting at $index in array $arr")
                   oob = true
                   Val.Bottom
@@ -888,7 +890,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               var ase = false
               def put(arr:VAL[A]) : Val[A] = arr match {
                 case Null_?() =>
-                  // FIXME: What if we are guaranteed an NPE?
                   log('warn) (s"Found null pointer exception when putting $entry at $index in array $arr")
                   npe = true
                   Val.Bottom
@@ -922,7 +923,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   oob = true
                   put__(check)
                 case Outside =>
-                  // FIXME: What if we are guaranteed an OOB?
                   log('warn) (s"Found array-index-out-of-bounds exception when putting $entry at $index in array $arr")
                   oob = true
                   Val.Bottom
@@ -931,6 +931,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               if(oob) uncaught += Exceptionals.ARRAY_INDEX
               if(ase) uncaught += Exceptionals.ARRAY_STORE
               val new_arr = varray eval_ put
+              if(new_arr == Val.Bottom) throw EscapeHatch
               // FIXME: See PUT_FIELD
               //tracef = tracef +# (srcs(0), new_arr)
           }
@@ -945,7 +946,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           var npe = false
           def set_monitored(v:VAL[RefType]) : Val[OBJECT] = v match {
             case Null_?() =>
-              // FIXME: What if we are guaranteed an NPE?
               log('warn) (s"Found null pointer exception when changing monitor on $v")
               npe = true
               Val.Bottom
@@ -959,6 +959,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           if(npe) uncaught += Exceptionals.NULL_POINTER
           val new_obj = obj eval_ set_monitored
+          if(new_obj == Val.Bottom) throw EscapeHatch
           // FIXME: See PUT_FIELD
           //tracef = tracef +# (srcs(0), new_obj)
         
@@ -981,7 +982,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                       neg_len = true
                       Val.Atom(atyp.instance(Val.Bottom, ('length, vl)))
                     case Tri.F =>
-                      // FIXME: What if we are guaranteed a NAS?
                       log('warn) (s"Found negative array size exception when allocating new array of size $len")
                       neg_len = true
                       Val.Bottom
@@ -1029,7 +1029,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           var npe = false
           def len(arr:VAL[A]): Val[INT.type] = arr match {
             case Null_?() =>
-              // FIXME: What if we are guaranteed an NPE?
               log('debug) ("Found null pointer exception when getting length of array "+arr)
               npe = true
               Val.Bottom
@@ -1169,11 +1168,23 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           @inline def invoke_virtual() = invoke_dispatch(false)
           @inline def invoke_super() = invoke_dispatch(true)
           
-          // FIXME: Arrays can indeed be used in rare situations; where they use Object methods
           @inline
           def invoke_dispatch(sup: Boolean) = {
-            val vobj = operands.head.asInstanceOf[Val[OBJECT]]
-            def getIlk(obj: VAL[OBJECT]) = {
+            val vobj = operands.head.asInstanceOf[Val[RefType]]
+            // Filter out nulls...
+            val sobj =
+              (for(obj <- vobj.asSet) yield obj.asInstanceOf[INST[RefType]].isNull match {
+                case Tri.T =>
+                  log('warn) (s"Found null pointer exception when calling $mdesc on $obj")
+                  None
+                case Tri.U =>
+                  log('debug) (s"Found possible null pointer exception when calling $mdesc on $obj")
+                  Some(obj)
+                case Tri.F => Some(obj)
+              }).flatten
+            if(sobj.isEmpty) throw EscapeHatch
+            
+            def getIlk(obj: VAL[RefType]) = {
               val ilk = obj.typ.klass
               if(ilk == null) null
               else if(!sup) ilk
@@ -1184,12 +1195,12 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
             }
             if(opts.debug) {
               // Create equivalance classes for ilks
-              val ilks = vobj.asSet groupBy getIlk
+              val ilks = sobj groupBy getIlk
               log('debug) (s"Resolving call with ${ilks.size} ilks: ${ilks.keys}")
             }
             
             // Resolve virtual methods
-            def getVMeth(obj: VAL[OBJECT]) = {
+            def getVMeth(obj: VAL[RefType]) = {
               val ilk = getIlk(obj)
               if(ilk == null) ghost
               else mdesc.matchingOverload(ilk) match {
@@ -1203,7 +1214,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                 }
               }
             }
-            val vmeths = vobj.asSet groupBy getVMeth
+            val vmeths = sobj groupBy getVMeth
             if(opts.debug) {
               val withoutGhost = vmeths filter {_._1 == ghost}
               log('debug) (s"Resolved to ${withoutGhost.size} vmeths: ${withoutGhost.keys}")
@@ -1216,7 +1227,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           }
           
           @inline
-          def invoke_direct(mdesc: MethodDesc, _vobj: Val[OBJECT]) = {
+          def invoke_direct(mdesc: MethodDesc, _vobj: Val[RefType]) = {
             val typ = mdesc.parent.typ.asInstanceOf[RefType]
             val vobj = _vobj.asInstanceOf[Val[typ.type]]
             // TODO: Since the verifier has run, it must be true that all types of vobj are subtypes of typ;
@@ -1289,6 +1300,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       if(!ins.opcode.isInstanceOf[NoResult] && sink != None) {
         assert(result != null)
         log('debug) ("Result: "+result)
+        if(result == Val.Bottom) throw EscapeHatch
         def dependize[T <: Instantiable](v: VAL[T]): VAL[T] = v match {
           case Unknown_?() => v
           case Known_?(v)  => v.clone(cdeps)
@@ -1305,12 +1317,17 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
         for(i <- 0 until ins.operation.exceptionTypes.size)
           uncaught += Type(ins.operation.exceptionTypes.getType(i)).asInstanceOf[Exceptional]
       
-    } // End eval
+    }
     catch {
+      case EscapeHatch =>
+        log('debug) ("Escaping this path's abstract interpretation")
+        // FIXME: Some of these are proper throws
+        fsummarize_u(uncaught.toSeq:_*)
+        return
       case e:UnimplementedOperationException => throw e
       case e:RuntimeException if opts.continueOnInternalError => throw InternalError(s"@ Instruction $ins", e)
       case e:Error if opts.continueOnInternalError => throw InternalError(s"@ Instruction $ins", e)
-    }
+    }} // End eval + breakable
     
     // Handle last instruction, which branches
     val br : Instruction = insns.getLast
@@ -1348,7 +1365,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
       }
       return /*tailcall(*/trace_bb(bb.successors.head, bbtracer, uncaught, eval_state, static_env, tracef, heap)//)
     }
-    else if(bb.successors.size == 0) { handle_end(); break }
+    else if(bb.successors.size == 0) { handle_end(); return }
     else br.opcode match {
       // TODO: No need to match on br anymore; unindent this
       // Strictly branching, with multiple possible branches
@@ -1389,14 +1406,14 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               bbaffect(bb, header, static_env_, tracef_, heap_, uncaught_)
             case TracePhase.CleanupDone =>
               log('debug) ("Done cleaning up loop")
-              break
+              return
           }
         }
         
         if(phase != TracePhase.None && phase != TracePhase.CleanupDone)
           bbtracePhases(header) = advancePhase(phase, bbtracer, opts.loopingFuel, log('debug))
         
-        log('debug) ("Possible successors: "+bb.successors)
+        log('debug) (s"Possible successors (${bb.successors.size}): ${bb.successors}")
         
         // Test for successors of bb which could possibly be reached (given tracef_ and static_env_)
         /** Used to refine the environment based on the path */
@@ -1548,12 +1565,12 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
               reach ++= (bb.successors map ((_, bm)))
           }
         }
-        log('debug) ("Can reach: "+reach.keys+" out of "+bb.successors)
+        log('debug) (s"Can reach (${reach.keys.size}): ${reach.keys}")
         
         if(reach.isEmpty) {
           // We've reached the end of a trace of execution
           fsummarize_u(uncaught.toSeq:_*)
-          break
+          return
         }
         val branch_set =
           // FIXME: TracePhase.None shouldn't be a problem... so why do we have to check it?
@@ -1602,13 +1619,11 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
           tmp
         }
         
+        log('debug) (s"Will branch to (${branch_set.size}): $branch_set")
         // FIXME: This is probably incorrect, and just an issue with e.g. phasing
         if(branch_set.isEmpty) {
           log('debug) ("Branching set empty, so summarizing with uncaught exceptions")
           fsummarize_u(uncaught.toSeq:_*)
-        }
-        else {
-          log('debug) ("Will branch to: "+branch_set)
         }
         
         //val futures =
@@ -1621,7 +1636,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                                       reach(s).tracef,
                                       heap_)(reach(s).cdeps)//)
         //awaitAll(opts.timeout*1000, futures.toSeq:_*)
-    }} // End branch matching + breakable
+    } // End branch matching
     //done(Unit)
   } // End trace_bb
   
