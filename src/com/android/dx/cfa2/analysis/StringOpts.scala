@@ -1,7 +1,8 @@
-package com.android.dx.cfa2
+package com.android.dx.cfa2.analysis
 
 import scala.collection._
 import scala.reflect.runtime.universe._
+import scala.reflect.api.TypeTags
 
 trait StringOpts {
   protected[this] val rawCfg: Map[String, Any]

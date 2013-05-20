@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry excluding="com/android/dx/cfa2/tlc/HList.scala|com/android/dx/cfa2/tlc/" kind="src" path="src"/>
-	<classpathentry combineaccessrules="false" kind="src" path="/dx"/>
+	<classpathentry combineaccessrules="false" exported="true" kind="src" path="/dx"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="con" path="org.scala-ide.sdt.launching.SCALA_CONTAINER"/>
 	<classpathentry kind="output" path="bin"/>

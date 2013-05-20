@@ -6,6 +6,9 @@ import cfa2._
 
 import scala.collection._
 
+import scala.language.experimental.macros
+import scala.reflect.macros.Context
+
 package object `val` {
   
   type ARRAY[T <: Instantiable] = T#Array
@@ -52,10 +55,27 @@ package object `val` {
       if(!v.isUnknown) Some(v.asInstanceOf[KNOWN[T]])
       else None
   }
+  /////////// These are stupid hacks to deal with https://issues.scala-lang.org/browse/SI-884
+  object Known_Ref_? {
+    def unapply[T <: RefType](v:VAL[T]): Option[KNOWN[T]] =
+      if(!v.isUnknown) Some(v.asInstanceOf[KNOWN[T]])
+      else None
+  }
+  object Known_OBJECT_? {
+    def unapply[T <: OBJECT](v:VAL[T]): Option[KNOWN[T]] =
+      if(!v.isUnknown) Some(v.asInstanceOf[KNOWN[T]])
+      else None
+  }
+  object Known_INT_? {
+    def unapply[T <: INT.type](v:VAL[T]): Option[KNOWN[T]] =
+      if(!v.isUnknown) Some(v.asInstanceOf[KNOWN[T]])
+      else None
+  }
+  /////////// END
   object Null_? {
     def unapply(v:VAL[RefType]): Boolean = v match {
       case v if v.typ == NULL => true
-      case Known_?(v) if v.isNull == Tri.T => true
+      case Known_Ref_?(v) if v.isNull == Tri.T => true
       case _ => false
     }
   }
@@ -115,6 +135,7 @@ package object `val` {
     case v:KNOWN[RefType] => v.isNull 
   }
   
+  // FIXME: These crash the compiler
   /*type VOID = VOID.type
   type BOOLEAN = BOOLEAN.type
   type BYTE = BYTE.type

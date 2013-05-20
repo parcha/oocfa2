@@ -3,6 +3,7 @@ package com.android.dx
 import com.android.dx
 import cfa2._
 import scala.collection.{parallel=>par, _}
+import com.android.dx.cfa2.analysis.CFA2Analysis
 
 package object cfa2 {
 
@@ -120,25 +121,6 @@ package object cfa2 {
   object BuiltinAnalysisClassLoader extends AnalysisClassLoader(ClassLoader.getSystemClassLoader,
                                                                 (analysisClasspath map (_.toURL)))
   val analysisMirror = scala.reflect.runtime.universe.runtimeMirror(BuiltinAnalysisClassLoader)
-  
-  /* ============ Hooks ================== */
-  import `val`._
-  type Hook[-Args, +Ret] = Args => Option[Ret]  
-  type InstanceHook = Hook[(Instantiable, Val_, IParams),
-                           IParams]
-  type CloneHook = Hook[(Instantiable#Instance, Val_, IParams),
-                        IParams]
-  type UnknownMethodHook = Hook[(wrap.MethodDesc, Seq[Val_]),
-                                Val_]
-  type KnownMethodHook = Hook[(wrap.Method, Seq[Val_], CFA2Analysis.FSummary),
-                              CFA2Analysis.FSummary]
-  
-  def HOOK[Args, Ret, H <: Hook[Args, Ret]]
-          (hooks: Iterable[H], args: Args, act:Ret=>Unit) =
-    for(hook <- hooks) hook(args) match {
-      case None      =>
-      case Some(ret) => act(ret)
-    }
   
   /* ============= String repr stuff ========= */
   

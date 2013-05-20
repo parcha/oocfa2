@@ -9,6 +9,7 @@ import `val`._
 import prop._
 import Properties._
 import parsers._
+import adt.Cacher
 import scala.collection._
 import java.lang.{Class => JClass}
 import java.lang.reflect.{Member => JMember, Method => JMethod, Constructor => JConstructor}
@@ -41,7 +42,7 @@ sealed trait MethodDesc extends Immutable with NotNull {
   final def matchingOverload(klass: JClass[_]): Option[JMethod] = argCs match {
     case None  => None
     case Some(argCs) =>
-      import CFA2Analysis.{log, logs} // For debugging
+      import analysis.CFA2Analysis.{log, logs} // For debugging
       var curr = klass
       // Recurse through the type hierarchy, searching for the method
       while(curr != null) {

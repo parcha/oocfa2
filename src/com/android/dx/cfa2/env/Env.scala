@@ -5,6 +5,8 @@ import dx.cfa2
 import cfa2._
 import `var`._
 import `val`._
+import analysis.CFA2Analysis
+import adt.MapProxyFactory
 
 import collection._
 import collection.{parallel => par}

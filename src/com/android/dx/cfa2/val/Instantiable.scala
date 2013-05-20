@@ -5,6 +5,8 @@ import dx.cfa2
 import cfa2._
 import Type._
 import env._
+import analysis.{Analysis, CFA2Analysis}
+import adt.Registrar
 import dx.rop.`type`.{Type => RawType, _}
 import scala.collection.{parallel => par, _}
 import scala.reflect.ClassTag
@@ -41,7 +43,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
    * Represents a value of this type. They must be referentially distinct within the
    * abstract interpretation so that they can be individually and uniquely tracked.
    */
-  sealed abstract class Value extends Immutable with NotNull with Serializable {
+  //FIXME: commented out sealed because it leads to https://issues.scala-lang.org/browse/SI-6921
+  /*sealed*/ abstract class Value extends Immutable with NotNull with Serializable {
     final val typ: Self = self
     final def isValueOf(t: Instantiable) = typ < t 
     val isUnknown : Boolean
@@ -73,7 +76,8 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
     final def satisfies(f: Instance => Tri): Tri = this match {
       case Unknown_?() => Tri.U
       // FIXME: Why do we have to mark Instance here? Scala typechecker fail
-      case Known_?(v:Instance) => f(v)
+      // HACK: Avoiding the Known_? typing issue
+      case v:Instance if !v.isUnknown => f(v)
     }
     //final def satisfies(f: Instance => Boolean): Tri = this satisfies (f andThen Tri.lift)
   }
@@ -150,7 +154,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
       
       // FIXME: Hack
       import CFA2Analysis.singleton.clone_hooks
-      HOOK(clone_hooks, (this, deps_, params_), addMissingParams)
+      analysis.HookedCFA2Analysis.HOOK(clone_hooks, (this, deps_, params_), addMissingParams)
         
       val clone = constructor(params_, deps_)
       clone._origin = Some(this)
@@ -296,18 +300,18 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
       
       private[this] def checkIndex(i: Int): Tri = length match {
         case Unknown_?() => Tri.U
-        case Known_?(l)   => i < l.self
+        case Known_INT_?(l)   => i < l.self
       }
       private[this] def checkIndex(i: VAL[INT.type]): Tri = length match {
         case Unknown_?() => Tri.U
-        case Known_?(l)   => i match {
+        case Known_INT_?(l)   => i match {
           case Unknown_?() => Tri.U
-          case Known_?(i)   => i.self < l.self
+          case Known_INT_?(i)   => i.self < l.self
         }
       }
       private[this] def checkIndex(i: Val[INT.type]): Tri = length match {
         case Unknown_?() => Tri.U
-        case Known_?(l)   =>
+        case Known_INT_?(l)   =>
           if(i satisfies {_.isUnknown}) Tri.U
           else {
             val count = i.asSet count {_.asInstanceOf[INST[INT.type]].self < l.self}
@@ -357,7 +361,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
         case Unknown_?() =>
           if(array isEmpty) NotExists
           else Some(Val.deepUnion[component_typ.type](array.seq.values))
-        case Known_?(i) =>
+        case Known_INT_?(i) =>
           get(i.self)
         })
       def apply(vi: Val[INT.type]) : IndexCheck[GetResult]= wrapIndexCheck(vi,
@@ -382,7 +386,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
         else {
           val (yes, maybe) = poss partition {test(_) == Tri.T}
           if(!maybe.isEmpty) {
-            import CFA2Analysis.Opts.ArrayCovarianceBehaviors._
+            import Analysis.Opts.ArrayCovarianceBehaviors._
             CFA2Analysis.singleton.opts.arrayCovarianceBehavior match {
               case Warn =>
                 CFA2Analysis.log('debug)(s"Possibly invalid array stores for $component_typ: $maybe")

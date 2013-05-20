@@ -1,10 +1,8 @@
-package com.android.dx.cfa2
-
-import collection.{parallel=>par, _}
+package com.android.dx.cfa2.adt
+import collection._
 import collection.JavaConversions._
 import collection.mutable._
-import collection.concurrent
-import concurrent.TrieMap
+import collection.concurrent.TrieMap
 
 class MutableConcurrentMap[K,V]
 extends mutable.MapProxy[K,V] with concurrent.Map[K,V] {

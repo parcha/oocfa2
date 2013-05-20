@@ -4,7 +4,9 @@ import com.android.dx
 import dx.rop.code.{Insn => RawInsn, _}
 import dx.cfa2
 import cfa2._
-import cfa2.`val`._
+import `val`._
+import adt.Cacher
+
 import scala.collection._
 
 sealed case class Instruction(val raw:RawInsn) extends Immutable with NotNull {

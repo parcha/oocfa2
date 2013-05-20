@@ -1,7 +1,8 @@
-package com.android.dx.cfa2
+package com.android.dx.cfa2.adt
 
 import scala.collection._
 import scala.ref.SoftReference
+import com.android.dx.cfa2.adt.MutableConcurrentMap
 
 trait Cache[K, V <: AnyRef] extends mutable.Map[K, SoftReference[V]] {
   def cache(k:K, v:V) = {this += ((k, new SoftReference(v))); v}

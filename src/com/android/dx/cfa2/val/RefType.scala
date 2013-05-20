@@ -4,10 +4,10 @@ import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
+import adt.MutableConcurrentMap
 import env._
 import `var`._
 import wrap.{MethodIDer, MethodDesc}
-
 import scala.collection._
 import scala.reflect.classTag
 
@@ -211,10 +211,7 @@ object NULL extends RefType(RawType.KNOWN_NULL) with Singleton {
  * artificially subtype all the ref types.
  */
 abstract class OBJECT(raw:RawType) extends RefType(raw) with Type.NonFinal {
-  val klass = BuiltinAnalysisClassLoader.reflectClassDescriptor(descriptor) match {
-    case None    => null
-    case Some(c) => c
-  }
+  val klass = BuiltinAnalysisClassLoader.reflectClassDescriptor(descriptor).orNull
   if(klass != null) {
     OBJECT.classRegistry += ((klass, this))
   }

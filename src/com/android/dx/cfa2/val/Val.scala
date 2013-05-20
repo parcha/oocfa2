@@ -3,11 +3,11 @@ package com.android.dx.cfa2.`val`
 import com.android.dx
 import dx.cfa2
 import cfa2._
-
 import scala.annotation.unchecked._
 import scala.collection.{Set => CSet, Seq => CSeq, _}
 import immutable._
 import parallel.immutable._
+import com.android.dx.cfa2.analysis.CFA2Analysis
 
 sealed abstract class Val[+T <: Instantiable]
 extends Immutable with Serializable with NotNull{
@@ -23,6 +23,7 @@ extends Immutable with Serializable with NotNull{
   final def union[T <: Instantiable](that:Val[T]) =
     Val.union(this, that)
   
+  /** Evaluate some function for all of the values in this Val **/
   final def eval [ArgT >: Type <: Instantiable, RetT <: Instantiable]
                  (f: VAL[ArgT]=>VAL[RetT], untyped:Boolean=false) : Val[RetT] = {
     val rets = for(arg <- asSet) yield f(arg)

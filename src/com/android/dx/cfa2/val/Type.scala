@@ -4,7 +4,8 @@ import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
-import CFA2Analysis.singleton.opts.log
+import analysis.CFA2Analysis.singleton.opts.log
+import adt.Registrar
 import env._
 import Tri._
 import parsers._

@@ -6,6 +6,7 @@ import parsers._
 import dx.rop.`type`.{Type => DType}
 import java.lang.{Class => JClass}
 import java.net.{URLClassLoader, URL}
+import com.android.dx.cfa2.analysis.CFA2Analysis
 
 class AnalysisClassLoader(parent: ClassLoader, urls: Iterable[URL] = List())
 extends URLClassLoader(urls.toArray, parent) {

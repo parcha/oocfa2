@@ -3,7 +3,8 @@ package com.android.dx.cfa2.`val`
 import com.android.dx
 import dx.cfa2
 import cfa2._
-import CFA2Analysis.singleton.opts.log
+import adt.Registrar
+import analysis.CFA2Analysis.singleton.opts.log
 import scala.reflect.ClassTag
 import scala.collection.{parallel => par, _}
 import scala.ref.WeakReference

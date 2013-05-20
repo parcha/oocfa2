@@ -1,4 +1,4 @@
-package com.android.dx.cfa2
+package com.android.dx.cfa2.adt
 
 import scala.collection._
 import scala.ref.WeakReference

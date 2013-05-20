@@ -4,9 +4,10 @@ import com.android.dx
 import dx.rop.code.AccessFlags
 import dx.cfa2._
 
+import adt.MutableConcurrentMultiMap
+
 import collection.{Set => CSet, _}
 import collection.{parallel => par}
-
 import java.lang.reflect.{Member => JMember, Modifier => JModifier, Method => JMethod}
 
 /**

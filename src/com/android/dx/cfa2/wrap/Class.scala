@@ -45,7 +45,7 @@ final case class Class(raw: RawClass) extends DalvikClassDesc {
   lazy val spec = raw.getThisClass
   lazy val props = prop.Range(prop.Domain.Class, raw.getAccessFlags)
   def _is(prop) = props contains prop
-  def annotations = raw.getClassAnnotations()
+  //def annotations = raw.getClassAnnotations()
   override def toString = spec.toHuman+"@"+raw.getSourceFile.getString
 }
 object Class {

@@ -1,79 +1,55 @@
-package com.android.dx.cfa2
+package com.android.dx.cfa2.analysis
 
 import com.android.dx
 import dx.opt.{OptimizationContext => Context, _}
-import dx.dex.file.{ClassDefItem, ClassDataItem => CDI}
 import dx.rop.cst.CstType
-import dx.rop.`type`.Prototype
+import dx.cfa2._
+
 import wrap.{BasicBlock => BB, _}
-import ROpCodes.{Val => _, _}
-import Method._
+import wrap.ROpCodes.{Val => _, _}
+import wrap.Method._
 import CFA2Analysis._
 import Logger._
 import env._
 import `var`._
 import `val`._
-import Type._
-import Exceptionals._
-import prop.{Set => PropSet, _}
-import collection._
-import collection.{parallel => par}
-import collection.JavaConversions._
+import `val`.Type._
+import `val`.Exceptionals._
+import adt.{MutableConcurrentMap, MutableConcurrentMultiMap}
+import prop.{Set => PSet, _}
 import annotation._
-import util.control.TailCalls.{Call=>TCall, _}
+//import util.control.TailCalls._
 import util.control.Breaks._
-import actors.Actor.actor
 import scala.actors.Futures._
-import scala.annotation.unchecked.uncheckedStable
 import java.io.File
+import java.lang.reflect.{Method => JMethod}
+import com.android.dx.cfa2.CompressedFileLogger
+import com.android.dx.cfa2.ConditionalLogger
+import com.android.dx.cfa2.DualLogger
+import com.android.dx.cfa2.FileLogger
+import com.android.dx.cfa2.Logger
+import com.android.dx.cfa2.PrintLogger
+import com.android.dx.cfa2.Tri
+import com.android.dx.cfa2.Tri.lift
+import com.android.dx.cfa2.env.HeapEnv.wrap
+import com.android.dx.cfa2.env.SFEnv.wrap
+import com.android.dx.cfa2.env.TraceFrame.wrap
+import com.android.dx.cfa2.`val`.FieldSlot.wrap
+import com.android.dx.cfa2.wrap.BasicBlock.unwrap
+import com.android.dx.cfa2.wrap.Class.unwrap
+import com.android.dx.cfa2.wrap.Instruction.unwrap
+import com.android.dx.cfa2.wrap.Instruction.wrap
+
+import scala.collection.{parallel => par, _}
+import scala.collection.JavaConversions._
+
 import java.lang.reflect.{Method => JMethod}
 
 object CFA2Analysis {
   
-  abstract class Opts protected[CFA2Analysis] extends Immutable with NotNull {
-    import Opts._
-    def single_threaded: Boolean
-    def debug: Boolean
-    // In seconds
-    def timeout: Int
+  abstract class Opts protected[CFA2Analysis] extends Analysis.Opts {
     def recursionFuel: Int
     def loopingFuel: Int
-    def outPath: String
-    
-    def continueOnOverflow = !debug
-    def continueOnInternalError = !debug
-    def arrayCovarianceBehavior: ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Warn
-    
-    lazy val extra_classpaths: Option[List[java.net.URL]] = None
-    protected[CFA2Analysis] lazy val starting_points: Iterable[MethodIDer] = immutable.Seq(MethodIDer.Accessible)
-    
-    protected[this] def mkLog(sym: Symbol): (Symbol, Logger) = (sym, new FileLogger(outPath+"/"+sym.name+".log"))
-    protected[this] def mkLog(sym: Symbol, primary: Logger): (Symbol, Logger) =
-      (sym, new DualLogger(primary, mkLog(sym)._2))
-    
-    private[this] lazy val debugLog = new ConditionalLogger(debug, new CompressedFileLogger(outPath+"/debug.log"))
-    protected[this] def _logs = immutable.Map(
-      // FIXME: Hack to get other streams interleaved into debug
-      mkLog('out, new DualLogger(new PrintLogger(System.out), debugLog)),
-      mkLog('info, new DualLogger(new PrintLogger(System.err), debugLog)),
-      mkLog('warn, new DualLogger(new PrintLogger(System.err), debugLog)),
-      ('debug, debugLog),
-      mkLog('error, new PrintLogger(System.err)))
-    final lazy val logs = _logs
-    lazy val log = new Opts.Loggers(logs)
-    def loggers = log.logs.values
-  }
-  object Opts {
-    object ArrayCovarianceBehaviors extends Enumeration {
-      val Warn, // Warn and keep going assuming everything is fine
-          Mask // Mask it with an unknown value of the correct type
-          = Value
-    }
-    type ArrayCovarianceBehavior = ArrayCovarianceBehaviors.Value
-    
-    final class Loggers(val logs: Map[Symbol, Logger]) {
-      def apply(l: Symbol) = logs(l)
-    }
   }
   
   type EncodedTrace = scala.Array[Int]
@@ -105,9 +81,9 @@ object CFA2Analysis {
     override def toString = mkString("[", " ~ ", "]")
   }
   object Tracer {
-    implicit def wrap[E](raw: TracerRepr[E]) = new Tracer(raw)
-    implicit def unwrap[E](t: Tracer[E]): TracerRepr[E] = t.self
-    def apply[E](raw: TracerRepr[E] = immutable.Vector()) = wrap(raw)
+    implicit def wrapTrace[E](raw: TracerRepr[E]) = new Tracer(raw)
+    implicit def unwrapTrace[E](t: Tracer[E]): TracerRepr[E] = t.self
+    def apply[E](raw: TracerRepr[E] = immutable.Vector()) = wrapTrace(raw)
     
     final class Builder[E] extends mutable.Builder[E, Tracer[E]] {
       protected val builder = new immutable.VectorBuilder[E]()
@@ -228,8 +204,8 @@ object CFA2Analysis {
  * FIXME:
  * * We don't execute the static initialization code for classes once they're "loaded" 
  */
-abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
-                                      protected[cfa2] final val opts:O) extends Optimizer {
+abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], opts:O)
+                                      extends Analysis[O](opts) {
   import CFA2Analysis._
   import Tracer._
   
@@ -321,7 +297,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     }
     build result
   }
-  protected[cfa2] final val classes = (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_))
+  protected[cfa2] final val classes =
+    (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_)).toSet
   protected[cfa2] final val cdis = for(c <- classes) yield c.getCDI
   /** Holds known IField slots */
   protected[cfa2] final val ifieldMap = {
@@ -382,11 +359,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
     def f(pair:(Method, Context.Data)): Some[Method] = Some(pair._1)
     (dataMap find { _._2.methRef.equals(spec) }) flatMap f
   }
-  @inline
-  protected[cfa2] def classForMethod(m: Method) = dataMap get m match {
-    case Some(d) => Some(d.clazz)
-    case None    => None
-  }
   
   /* ====== Results ======= */
   /*lazy val results : Results = new Results {
@@ -394,6 +366,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
   }*/
   
   /* ====== Hooks ======= */
+  import HookedCFA2Analysis._
   protected[cfa2] def instance_hooks: Iterable[InstanceHook]
   //require(!(instance_hooks exists {_ == null}))
   protected[cfa2] def clone_hooks: Iterable[CloneHook]
@@ -774,7 +747,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context],
                   npe = true
                   Val.Bottom
                 case OBJECT_?(v: VAL[OBJECT]) => v match {
-                  case Known_?(v)   => v~{_.apply(slot)}
+                  case Known_OBJECT_?(v)   => v~{_.apply(slot)}
                   case Unknown_?() =>
                     log('info) (s"Possible null pointer exception when getting slot $slot of $v")
                     npe = true

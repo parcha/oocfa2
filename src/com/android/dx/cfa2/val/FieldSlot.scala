@@ -3,7 +3,7 @@ package com.android.dx.cfa2.`val`
 import com.android.dx
 import dx.cfa2
 import cfa2._
-
+import cfa2.adt.{LinkSet, MapProxyFactory}
 import dx.dex.file.EncodedField
 import scala.collection._
 

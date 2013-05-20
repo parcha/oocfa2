@@ -1,17 +1,16 @@
 package com.android.dx.cfa2.`val`
 
 import language.dynamics
-
 import com.android.dx
 import dx.cfa2
 import dx.rop.`type`.{Type => RawType, _}
 import cfa2._
 import wrap._
 import env._
-
 import java.lang.reflect
 import scala.collection.{parallel=>par, _}
 import scala.reflect.ClassTag
+import com.android.dx.cfa2.analysis.CFA2Analysis
 
 abstract class Dynamic[ET](raw: RawType)(final implicit val EigenType_ : ClassTag[ET])
 extends OBJECT(raw) with Reflected[ET] {
