@@ -23,7 +23,7 @@ object ProbablePrimeFactory extends PrimeFactory {
     var cnt = memo.size
     while(cnt < i) {
       memo += memo.last.nextProbablePrime
-      cnt -= 1
+      cnt += 1
     }
   }
 }
