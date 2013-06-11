@@ -2,11 +2,9 @@ package com.android.dx.cfa2.adt
 
 import scala.collection._
 
-abstract class MapFactory[_K, _V, _M <: MapFactory.Mapped[_K, _V, _M]]
-(private[this] val empty: _M) { factory_ =>
-  final type K = _K
-  final type V = _V
-  final type M = _M
+abstract class MapFactory[K, +V, +_M[K,V] <: MapFactory.Mapped[K, V, _M[K,V]]]
+(private[this] val empty: _M[K,V]) { factory_ =>
+  final type M = _M[K,V]
   class Builder(start:M = empty) extends mutable.MapBuilder[K, V, M](start) /*with MapLike[K, V, M]*/
   implicit object Builder extends generic.CanBuildFrom[M, (K, V), M] {
     def apply() = new factory_.Builder()
@@ -25,24 +23,26 @@ abstract class MapFactory[_K, _V, _M <: MapFactory.Mapped[_K, _V, _M]]
   final def +# (self:M)(k:K, v:V) : M = self.++[(K, V), M](Array((k,v)))
 }
 object MapFactory {
-  type Mapped[K,V,M <: Mapped[K,V,M]] = GenMap[K,V] with GenMapLike[K,V,M]
+  type Mapped[K,+V,+M <: Mapped[K,V,M]] = GenMap[K,V] with GenMapLike[K,V,M]
 }
 
-abstract class MapProxyFactory[K, V, M <: MapProxyFactory.Mapped[K,V,M], _Proxy <: MapProxyLike[K,V,M]]
-(empty: M, private[this] val proxyCtor: M => _Proxy)
+abstract class MapProxyFactory[K, +V, 
+                               +M[K,V] <: MapProxyFactory.Mapped[K,V,M[K,V]],
+                               +_Proxy <: MapProxyLike[K,V,M[K,V]]]
+(empty: M[K,V], private[this] val proxyCtor: M[K,V] => _Proxy)
 extends MapFactory[K, V, M](empty) { factory_ =>
   final type Proxy = _Proxy
   final type ProxyLike = MapProxyLike[K,V,M]
   
   /** CAUTION: Inherit this BEFORE all other traits, otherwise you get recursion **/
   trait ProxyFactoried { _:Proxy =>
-    final val ++# = factory_.++#(self) _
-    final val +# = factory_.+#(self) _
+    final val ++# = factory.++#(self) _
+    final val +# = factory.+#(self) _
     final val factory = factory_
   }
   
   final implicit def wrap(m: M): Proxy =  proxyCtor(m)
 }
 object MapProxyFactory {
-  type Mapped[K,V, M <: Mapped[K,V,M]] = Map[K,V] with MapLike[K,V,M]
+  type Mapped[K,+V, +M <: Mapped[K,V,M]] = GenMap[K,V] with GenMapLike[K,V,M]
 }

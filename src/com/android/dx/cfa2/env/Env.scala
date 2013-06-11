@@ -8,8 +8,8 @@ import `val`._
 import analysis.CFA2Analysis
 import adt.MapProxyFactory
 
-import collection._
-import collection.{parallel => par}
+import scala.collection._
+import scala.collection.{parallel => par}
 
 // TODO: Contemplate the repercussions of making Envs point to WeakRefs
 trait Env[VarT <: Var_] extends Map[VarT, Val_]
@@ -47,7 +47,7 @@ trait Env[VarT <: Var_] extends Map[VarT, Val_]
 /** Convenience type; only immutable envs should need this */
 abstract class EnvFactory[VarT <: Var_, E <: Env[VarT] with immutable.MapProxy[VarT,Val_]]
 (proxyCtor: immutable.Map[VarT,Val_] => E)
-extends MapProxyFactory[VarT, Val_, immutable.Map[VarT,Val_], E](immutable.Map(), proxyCtor) {
+extends MapProxyFactory[VarT, Val_, immutable.Map, E](immutable.Map(), proxyCtor) {
   final val defaultM: M = immutable.Map()
   def union(a: E, b: E) : E = {
     val build = Builder()

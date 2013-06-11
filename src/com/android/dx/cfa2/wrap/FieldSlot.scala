@@ -112,6 +112,7 @@ extends mutable.HashSet[FieldSlot] with LinkSet[FieldSlot, FieldSlotSet] with mu
       if(f.spec == spec) return Some(f)
     return None
   }
+  // FIXME: This is both wrong (at least missing ".") and inefficient; thankfully it's unused atm
   def get(name:String) = {
     def fullSpecName(spec:FieldSpec) = spec.getDefiningClass().getType().toHuman + specName(spec)
     def specName(spec:FieldSpec) = spec.getNat().getName().getString()
@@ -147,4 +148,4 @@ extends immutable.MapProxy[FieldSlot, Val_] with FieldMap.Factoried {
   
 }
 object FieldMap
-extends MapProxyFactory[FieldSlot, Val_, immutable.Map[FieldSlot, Val_], FieldMap] (immutable.Map(), new FieldMap(_))
+extends MapProxyFactory[FieldSlot, Val_, immutable.Map, FieldMap] (immutable.Map(), new FieldMap(_))
