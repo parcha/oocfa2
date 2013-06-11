@@ -63,6 +63,59 @@ object GodelHashDomain {
       new GodelIndex(i)
     }
   }
-  /*class Allocated[+E <: GodelHashed[Self, E], Self <: Allocated[E, Self]]
-  extends GodelIndexDomain[E, Self]*/
+  
+  import scala.collection.mutable.BitSet
+  /** Keeps a freelist of indices **/
+  class Allocated[+E <: Self#Indexed[E], Self <: Allocated[E, Self]]
+  extends Monotonic[E, Self] { _:Self =>
+    private[this] val freelist = new BitSet(PrimeFactory.initialPrimeHeuristic)
+    override def nextIdx = {
+      if(freelist isEmpty) super.nextIdx
+      else {
+        val free = freelist.head
+        freelist -= free
+        new GodelIndex(free)
+      }
+    }
+    /* We need to add the index to the freelist */
+    trait Indexed[+ISelf <: Indexed[ISelf]] extends super.Indexed[ISelf] { _:ISelf =>
+      final override protected def finalize() = {
+        super.finalize()
+        freelist += godelIndex.n
+      }
+    }
+  }
+  
+  /** Keeps a record of all the allocated indices **/
+  class Registered[+E <: Self#Indexed[E], Self <: Registered[E, Self]]
+  extends GodelIndexDomain[E, Self] { _:Self =>
+    private[this] val tracker = new BitSet(PrimeFactory.initialPrimeHeuristic)
+    /* Find the next index by starting at the midpoint and going down
+     * If that fails, start at the midpoint and go up
+     */
+    def nextIdx: GodelIndex = {
+      val sz = tracker.size
+      var i = sz/2
+      @inline
+      def ret = { tracker += i; new GodelIndex(i) }
+      while(i >= 0) {
+        if(!tracker(i)) return ret
+        i -= 1
+      }
+      i = (sz/2)+1
+      while(i < tracker.size) {
+        if(!tracker(i)) return ret
+        i += 1
+      }
+      i = sz
+      return ret
+    }
+    /* We need to deallocate the index */
+    trait Indexed[+ISelf <: Indexed[ISelf]] extends super.Indexed[ISelf] { _:ISelf =>
+      final override protected def finalize() = {
+        super.finalize()
+        tracker -= godelIndex.n
+      }
+    }
+  }
 }
