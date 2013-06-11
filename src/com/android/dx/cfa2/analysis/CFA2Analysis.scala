@@ -7,7 +7,7 @@ import dx.cfa2._
 
 import wrap.{BasicBlock => BB, _}
 import wrap.ROpCodes.{Val => _, _}
-import wrap.Method._
+import wrap.DalvikMethod._
 import CFA2Analysis._
 import Logger._
 import env._
@@ -34,9 +34,8 @@ import com.android.dx.cfa2.Tri.lift
 import com.android.dx.cfa2.env.HeapEnv.wrap
 import com.android.dx.cfa2.env.SFEnv.wrap
 import com.android.dx.cfa2.env.TraceFrame.wrap
-import com.android.dx.cfa2.`val`.FieldSlot.wrap
 import com.android.dx.cfa2.wrap.BasicBlock.unwrap
-import com.android.dx.cfa2.wrap.Class.unwrap
+import com.android.dx.cfa2.wrap.DalvikClass.unwrap
 import com.android.dx.cfa2.wrap.Instruction.unwrap
 import com.android.dx.cfa2.wrap.Instruction.wrap
 
@@ -100,10 +99,10 @@ object CFA2Analysis {
                             uncaught_out: immutable.Set[Exceptional]) extends Immutable with NotNull
   type BBEffects = MutableConcurrentMap[BB, MutableConcurrentMap[BBTracer, BBEffect]]
   
-  type FTracer = Tracer[Method]
+  type FTracer = Tracer[DalvikMethod]
   final case class FEffect(static_env_out: SFEnv,
                            heap_out: HeapEnv) extends Immutable with NotNull
-  type FEffects = MutableConcurrentMap[Method, MutableConcurrentMap[FTracer, FEffect]]
+  type FEffects = MutableConcurrentMap[DalvikMethod, MutableConcurrentMap[FTracer, FEffect]]
   
   // TODO: Let's migrate to a proper database at some point...
   final case class FIndex(static_env: SFEnv,
@@ -113,7 +112,7 @@ object CFA2Analysis {
                             rets: MutableConcurrentMap[EncodedTrace, RetVal],
                             static_envs: MutableConcurrentMap[EncodedTrace, SFEnv],
                             heaps: MutableConcurrentMap[EncodedTrace, HeapEnv]) extends Immutable with NotNull
-  type FSummaries = MutableConcurrentMap[Method, MutableConcurrentMap[FIndex, FSummary]]
+  type FSummaries = MutableConcurrentMap[DalvikMethod, MutableConcurrentMap[FIndex, FSummary]]
                             
   /**
    * To keep "hidden" state in between two or more instruction evaluations or BBs
@@ -259,15 +258,15 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   /* ====== Initialization ====== */
   protected[cfa2] final val methodMap = {
     val build = {
-      type Builder = mutable.MapBuilder[Method, Context, par.immutable.ParMap[Method, Context]]
+      type Builder = mutable.MapBuilder[DalvikMethod, Context, par.immutable.ParMap[DalvikMethod, Context]]
       new Builder(par.immutable.ParMap()) {
-        def contains(m:Method) : Boolean = elems.seq.contains(m)
+        def contains(m:DalvikMethod) : Boolean = elems.seq.contains(m)
       }
     }
     for(c <- contexts)
       // Sort to give some determinism
       for((raw, data) <- c.dataMap.toSeq.sortBy(_._1.getName.getString)) {
-        val m = Method.wrap(raw, data.ropMeth)
+        val m = DalvikMethod.wrap(raw, data.ropMeth)
         require(!(build contains m))
         build += ((m, c))
       }
@@ -275,7 +274,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   }
   protected[cfa2] final val reflMethodMap = {
     val build = {
-      type Builder = mutable.MapBuilder[JMethod, DalvikMethodDesc, par.immutable.ParMap[JMethod, Method]]
+      type Builder = mutable.MapBuilder[JMethod, DalvikMethodDesc, par.immutable.ParMap[JMethod, DalvikMethod]]
       new Builder(par.immutable.ParMap())
     }
     for(m <- methodMap.keys)
@@ -287,7 +286,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   }
   protected[cfa2] final val dataMap = {
     val build = {
-      type Builder = mutable.MapBuilder[Method, Context.Data, par.immutable.ParMap[Method, Context.Data]]
+      type Builder = mutable.MapBuilder[DalvikMethod, Context.Data, par.immutable.ParMap[DalvikMethod, Context.Data]]
       new Builder(par.immutable.ParMap())
     }
     for((m, c) <- methodMap) {
@@ -298,7 +297,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
     build result
   }
   protected[cfa2] final val classes =
-    (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (Class(_)).toSet
+    (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (DalvikClass(_)).toSet
   protected[cfa2] final val cdis = for(c <- classes) yield c.getCDI
   /** Holds known IField slots */
   protected[cfa2] final val ifieldMap = {
@@ -355,8 +354,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
     }
   
   @inline
-  protected[cfa2] def methodForSpec(spec: MethodSpec): Option[Method] = {
-    def f(pair:(Method, Context.Data)): Some[Method] = Some(pair._1)
+  protected[cfa2] def methodForSpec(spec: MethodSpec): Option[DalvikMethod] = {
+    def f(pair:(DalvikMethod, Context.Data)): Some[DalvikMethod] = Some(pair._1)
     (dataMap find { _._2.methRef.equals(spec) }) flatMap f
   }
   
@@ -379,7 +378,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   /* ====== Algorithm ===== */
   protected[this] val fsummaries = new FSummaries
   @inline
-  protected[this] final def summarize(m: Method,
+  protected[this] final def summarize(m: DalvikMethod,
                                       index: FIndex,
                                       trace: EncodedTrace,
                                       ret: RetVal) : Unit = {
@@ -394,7 +393,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
       rets(trace) = rets(trace) union ret
   }
   @inline
-  protected[this] final def summarize(m: Method,
+  protected[this] final def summarize(m: DalvikMethod,
                                       index: FIndex,
                                       trace: EncodedTrace,
                                       uncaught_throws: Iterable[Exceptional]) : Unit = {
@@ -403,7 +402,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
       fsummaries(m)(index).uncaught_throws += (trace, t)
   }
   @inline
-  protected[this] final def prep_summarize(m: Method,
+  protected[this] final def prep_summarize(m: DalvikMethod,
                                            index: FIndex) = {
     if(!fsummaries.contains(m))
       fsummaries += ((m, new MutableConcurrentMap))
@@ -418,7 +417,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   
   protected[this] val feffects = new FEffects
   @inline
-  protected[this] final def faffect(m: Method, trace: FTracer,
+  protected[this] final def faffect(m: DalvikMethod, trace: FTracer,
                                     static_env_out: SFEnv,
                                     heap_out: HeapEnv) = {
     if(!feffects.contains(m))
@@ -431,10 +430,10 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
    * TODO: Not threadsafe yet! Especially not for concurrently running evals
    * E.g., we can't do STM, so we can't safely concurrently merge fsummaries
    */
-  protected[this] type EvalWorklist = mutable.Map[Method, Boolean] 
+  protected[this] type EvalWorklist = mutable.Map[DalvikMethod, Boolean] 
   protected[this] val eval_worklist: EvalWorklist = {
     // Use an ordered map so as to give a semblance of determinism
-    val build = new mutable.LinkedHashMap[Method, Boolean]()
+    val build = new mutable.LinkedHashMap[DalvikMethod, Boolean]()
     for(m <- methodMap.seq.keys.toSeq.sortBy(_.id.raw)
         if opts.starting_points exists {(ider:MethodIDer) => +(ider identifies m)})
       build += ((m, false))
@@ -483,7 +482,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
     log('debug) ("\n\n******************** Done!");
   }
   
-  private[this] def eval(start: Method,
+  private[this] def eval(start: DalvikMethod,
                          initial_static_env: SFEnv,
                          initial_heap: HeapEnv) = {
     log('info) ("\nEvaluating "+start)
@@ -504,7 +503,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   /**
    * Here we guard against recursion and catch summaries
    */
-  def trace(meth: Method,
+  def trace(meth: DalvikMethod,
             mtracer: FTracer,
             mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
             _static_env: SFEnv,
@@ -560,7 +559,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
    * We might as well just keep it for the internal method trace (to e.g. avoid loops).
    */
   @inline
-  def trace_(meth: Method,
+  def trace_(meth: DalvikMethod,
              _mtracer: FTracer,
              mtracePhases: MutableConcurrentMap[FTracer, TracePhase],
              cdeps: Val_,
@@ -1038,8 +1037,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
           // FIXME: What if it returns void?
           @inline
           def call(mdesc: MethodDesc) = mdesc match {
-            case m: Method => call_known(m)
-            case m         => call_unknown(m)
+            case m: DalvikMethod => call_known(m)
+            case m               => call_unknown(m)
           }
           
           @inline
@@ -1058,8 +1057,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
                           immutable.Set(RetVal.Return(result)))
           }
           @inline
-          def call_known(m: Method) = {
-            val m = mdesc.asInstanceOf[Method]
+          def call_known(m: DalvikMethod) = {
+            val m = mdesc.asInstanceOf[DalvikMethod]
             log('debug) ("Call known: "+m)
             val params = mkparams(operands).toSeq
             val next_header = (mtracer.preheader :+ m).preheader :+ m

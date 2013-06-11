@@ -73,7 +73,7 @@ object Dynamic {
   def liftStaticCall(mdesc:MethodDesc, _vargs:Val_ *): Val[Reflected[_]] = {
     assert(isLiftableStaticCall(mdesc, _vargs:_*))
     val vargs = _vargs.asInstanceOf[Seq[Val[Reflected[_]]]]
-    val f = liftCall(true, mdesc.reflection.get, vargs:_*)
+    val f = liftCall(true, mdesc.reflected.get.refl, vargs:_*)
     Val.eval(f)(vargs:_*)
   }
   

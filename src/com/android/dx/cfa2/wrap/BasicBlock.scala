@@ -7,7 +7,7 @@ import cfa2._
 import adt.Cacher
 import scala.collection._
 
-final case class BasicBlock private (val raw:RawBB, implicit val parent: Method) extends Immutable with NotNull {
+final case class BasicBlock private (val raw:RawBB, implicit val parent: DalvikMethod) extends Immutable with NotNull {
   def label = raw.getLabel
   lazy val canCatch = raw.hasExceptionHandlers
   
@@ -65,9 +65,9 @@ final case class BasicBlock private (val raw:RawBB, implicit val parent: Method)
   override val hashCode = raw.hashCode
 }
 object BasicBlock extends Cacher[RawBB, BasicBlock]{
-  private def intern(raw:RawBB, parent: Method) = cache.cache(raw, new BasicBlock(raw, parent))
+  private def intern(raw:RawBB, parent: DalvikMethod) = cache.cache(raw, new BasicBlock(raw, parent))
   
-  def wrap(raw: RawBB, parent: Method) = cache cachedOrElse (raw, intern(raw, parent))
+  def wrap(raw: RawBB, parent: DalvikMethod) = cache cachedOrElse (raw, intern(raw, parent))
   implicit def unwrap(bb:BasicBlock) = bb.raw
 }
 

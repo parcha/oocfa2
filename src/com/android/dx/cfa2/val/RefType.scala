@@ -7,7 +7,7 @@ import cfa2._
 import adt.MutableConcurrentMap
 import env._
 import `var`._
-import wrap.{MethodIDer, MethodDesc}
+import wrap.{MethodIDer, MethodDesc, FieldSlot, FieldSlotSet, FieldMap}
 import scala.collection._
 import scala.reflect.classTag
 

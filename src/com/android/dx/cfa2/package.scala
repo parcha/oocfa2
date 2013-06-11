@@ -112,6 +112,8 @@ package object cfa2 {
   type IMethodSpec = MethodSpec
   type SMethodSpec = MethodSpec
   
+  type ClassSpec = dx.rop.cst.CstType
+  
   /* ============= Class-loading/lifting hackery =========== */
   import java.io.File
   val analysisClasspath : immutable.Seq[File] = immutable.Seq(

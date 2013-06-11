@@ -13,7 +13,7 @@ object HookedCFA2Analysis {
                         IParams]
   type UnknownMethodHook = Hook[(wrap.MethodDesc, Seq[Val_]),
                                 Val_]
-  type KnownMethodHook = Hook[(wrap.Method, Seq[Val_], CFA2Analysis.FSummary),
+  type KnownMethodHook = Hook[(wrap.DalvikMethod, Seq[Val_], CFA2Analysis.FSummary),
                               CFA2Analysis.FSummary]
   
   def HOOK[Args, Ret, H <: Hook[Args, Ret]]

@@ -7,7 +7,6 @@ import cfa2._
 import dx.opt.Optimizer
 
 import cfa2.wrap._
-import `val`.FieldSlot
 
 import scala.collection._
 
@@ -71,9 +70,9 @@ object Analysis {
 
 import Analysis._
 abstract class Analysis[+O<:Opts](protected[cfa2] final val opts:O) extends Optimizer {
-	protected[cfa2] val methods: GenSet[Method]
-	protected[cfa2] val reflMethodMap: GenMap[JMethod, Method]
-	protected[cfa2] val classes: GenSet[Class]
+	protected[cfa2] val methods: GenSet[DalvikMethod]
+	protected[cfa2] val reflMethodMap: GenMap[JMethod, DalvikMethod]
+	protected[cfa2] val classes: GenSet[DalvikClass]
 	protected[cfa2] val ifieldMap: GenMap[IFieldSpec, FieldSlot.Known]
 	protected[cfa2] val sfieldMap: GenMap[SFieldSpec, FieldSlot]
 }
