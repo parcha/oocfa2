@@ -166,14 +166,7 @@ abstract class Instantiable(raw:RawType) extends Type(raw) with DelayedInit { se
       clone
     }
                   
-    final override lazy val toString = {
-      val build = new StringBuilder
-      build append typ+"#{ "
-      build append params
-      build append "; DEPS: "+deps
-      build append " }"
-      build result
-    }
+    final override lazy val toString = s"$typ#{ $params; DEPS: $deps }"
     final override def equals(that: Any) = that match {
       case that:Instance_ => that equivalentParams this.params
       case _ => super.equals(that)
