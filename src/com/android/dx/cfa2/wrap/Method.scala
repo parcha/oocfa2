@@ -14,7 +14,8 @@ import scala.collection._
 import java.lang.{Class => JClass}
 import java.lang.reflect.{Member => JMember, Method => JMethod, Constructor => JConstructor}
 
-sealed abstract class _MethodDesc[+Self <: _MethodDesc[Self]] extends Immutable with NotNull { _:Self =>
+sealed abstract class _MethodDesc[+Self <: _MethodDesc[Self]]
+extends Immutable with NotNull { _:Self =>
   val name: String
   val parent: ClassDesc
   final lazy val id = {
@@ -37,18 +38,18 @@ sealed abstract class _MethodDesc[+Self <: _MethodDesc[Self]] extends Immutable 
   def argCs : Option[Seq[JClass[_]]]
   def exnCs : Option[Seq[JClass[_]]]
   
-  type Reflected = Self with _ReflMethodDesc[Self]
-  def ifReflected[R](_then: =>Reflected=>R)(_else: =>R): R = this match {
-    case self:Reflected => _then(self)
-    case _               => _else
-  }
+  type Reflected = this.type with _ReflMethodDesc[Self]
+  // HACK: Can't use nicer pattern-matching because of bug SI-7505
+  def ifReflected[R](_then: =>Reflected=>R)(_else: =>R): R =
+    if(this.isInstanceOf[Reflected]) _then(this.asInstanceOf[Reflected])
+    else _else
   val reflected = ifReflected[Option[Reflected]] {Some(_)} {None}
   
-  type Dalviked = Self with _DalvikMethodDesc[Self]
-  def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R): R = this match {
-    case self:Dalviked => _then(self)
-    case _              => _else
-  }
+  type Dalviked = this.type with _DalvikMethodDesc[Self]
+  // HACK: Can't use nicer pattern-matching because of bug SI-7505
+  def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R): R =
+    if(this.isInstanceOf[Dalviked]) _then(this.asInstanceOf[Dalviked])
+    else _else
   val dalviked = ifDalviked[Option[Dalviked]] {Some(_)} {None}
   
   /** Get the overload in klass that matches this method, if any **/
@@ -116,17 +117,15 @@ sealed abstract class _MethodDesc[+Self <: _MethodDesc[Self]] extends Immutable 
   
   override def toString = id+"/"+arity
 }
-object _MethodDesc {
-  private val strawmanComparator = new java.util.Comparator[MethodDesc] {
-    def compare(m1, m2) = m1.id.toString.compareTo(m2.id.toString) match {
-      case 0 => ClassDesc.strawmanComparator.compare(m1.parent, m2.parent)
-      case i => i
-    }
+object _MethodDesc extends StrawmanOrdering[MethodDesc] {
+  def compare(m1, m2) = m1.id.toString.compareTo(m2.id.toString) match {
+    case 0 => ClassDesc.compare(m1.parent, m2.parent)
+    case i => i
   }
-  implicit def strawmanOrdering[T <: MethodDesc] = mkCovariantOrdering[MethodDesc, T](strawmanComparator)
 }
 
-sealed trait _DalvikMethodDesc[+Self <: _DalvikMethodDesc[Self]] extends _MethodDesc[Self] { _:Self =>
+sealed trait _DalvikMethodDesc[+Self <: _DalvikMethodDesc[Self]]
+extends _MethodDesc[Self] { _:Self =>
   final def name = nat.getName.getString
   
   def prototype: dx.rop.`type`.Prototype
@@ -151,7 +150,7 @@ sealed trait _DalvikMethodDesc[+Self <: _DalvikMethodDesc[Self]] extends _Method
         }
   val exnCs = None
   
-  final override type Dalviked = Self
+  final override type Dalviked = this.type
   final override def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R) = _then(this)
   final override val dalviked = Some(this)
   
@@ -160,11 +159,9 @@ sealed trait _DalvikMethodDesc[+Self <: _DalvikMethodDesc[Self]] extends _Method
   final val isClassInit = nat.isClassInit
 }
 object _DalvikMethodDesc {
-  // HACK: no recursive type aliases in Scala :/
-  private[wrap] type Reflected[M <: _DalvikMethodDesc[M]] = M with _ReflMethod[_]
   @inline
   private[wrap] def getReflection[M <: _DalvikMethodDesc[M]](m:M)
-                                 (constrM: =>JMethod=>Reflected[M])
+                                 (constrM: =>JMethod=>M#Reflected)
                                  //(constrC: =>JConstructor[_]=>Reflected[M])
                                  : M = m.parent.typ match {
     // Arrays can have methods, too
@@ -204,8 +201,7 @@ object DalvikMethod extends Cacher[(Raw, RopMethod), DalvikMethod] {
     // Upgrade to ReflMethod if we can
     val m = new DalvikMethod(raw, rop)
     val m_ = _DalvikMethodDesc.getReflection(m) { _refl =>
-      type Refl = _DalvikMethodDesc.Reflected[DalvikMethod]
-      new DalvikMethod(raw, rop) with _ReflMethod[Refl] {
+      new DalvikMethod(raw, rop) with _ReflMethod[DalvikMethod#Reflected] {
         val refl = _refl
       }
     }
@@ -227,8 +223,7 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
     // Upgrade to ReflMethod if we can
     val m = new GhostMethod(spec)
     val m_ = _DalvikMethodDesc.getReflection(m) { _refl =>
-      type Refl = _DalvikMethodDesc.Reflected[GhostMethod]
-      new GhostMethod(spec) with _ReflMethod[Refl] {
+      new GhostMethod(spec) with _ReflMethod[GhostMethod#Reflected] {
         val refl = _refl
       }
     }
@@ -238,14 +233,15 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
 }
 
 
-sealed trait _ReflMethodDesc[+Self <: _ReflMethodDesc[Self]] extends _MethodDesc[Self] { _:Self =>
+sealed trait _ReflMethodDesc[+Self <: _ReflMethodDesc[Self]]
+extends _MethodDesc[Self] { _:Self =>
   val refl: JMethod // TODO: Change back to JMember when we support Constructors
   final def name = refl.getName
   final lazy val parent = ReflClass(refl.getDeclaringClass())
   
   final def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
   
-  final override type Reflected = Self
+  final override type Reflected = this.type
   final override def ifReflected[R](_then: =>Reflected=>R)(_else: =>R) = _then(this)
   final override val reflected = Some(this)
   

@@ -29,15 +29,6 @@ package object cfa2 {
   }
   }
   
-  def mkCovariantOrdering[T, U <: T](comparator: (U, U) => Int) =
-    Ordering.comparatorToOrdering (new java.util.Comparator[U] {
-      def compare(t1, t2) = comparator(t1, t2)
-    })
-  def mkCovariantOrdering[T, U <: T](comparator: java.util.Comparator[T]) =
-    Ordering.comparatorToOrdering[U](new java.util.Comparator[U] {
-      def compare(t1, t2) = comparator.compare(t1, t2)
-    })
-  
   /* ============ Exceptions =================== */
   /** This is an assertion/requirement stemming from reasonable program input/configuration **/
   final class PresumptionException(msg: String, cause: Throwable = null) extends Exception(msg, cause)

@@ -19,11 +19,11 @@ extends Immutable with NotNull { _:Self =>
   def parent: ClassDesc
   val typ: Instantiable
   
-  type Reflected = Self with _ReflFieldSlotDesc[Self]
-  def ifReflected[R](_then: =>Reflected=>R)(_else: =>R): R = this match {
-    case self:Reflected => _then(self)
-    case _              => _else
-  }
+  type Reflected = this.type with _ReflFieldSlotDesc[Self]
+  // HACK: Can't use nicer pattern-matching because of bug SI-7505
+  def ifReflected[R](_then: =>Reflected=>R)(_else: =>R): R =
+    if(this.isInstanceOf[Reflected]) _then(this.asInstanceOf[Reflected])
+    else _else
   val reflected = ifReflected[Option[Reflected]] {Some(_)} {None}
   
   final val isFinal = is(Final) | ((parent is Final) == Tri.T)
@@ -37,7 +37,7 @@ extends Immutable with NotNull { _:Self =>
 sealed trait _ReflFieldSlotDesc[+Self <: _ReflFieldSlotDesc[Self]]
 extends _FieldSlotDesc[Self] { _:Self =>
   val refl: JField
-  final override type Reflected = Self
+  final override type Reflected = this.type
   final override def ifReflected[R](_then: =>Reflected=>R)(_else: =>R) = _then(this)
   final override val reflected = Some(this)
   
@@ -57,33 +57,31 @@ object FieldSlot extends Cacher[FieldSpec, FieldSlot] {
     protected[this] def _is(prop) = props contains prop
   }
   object Known {
-    def apply(encoded:EncodedField) = wrap(encoded)
+    implicit def apply(encoded:EncodedField) = wrap(encoded)
   }
   sealed class Unknown private[FieldSlot] (spec:FieldSpec) extends FieldSlot(spec) {
     protected[this] def _is(prop) = Tri.U
   }
   object Unknown {
-    def apply(spec:FieldSpec) = wrap(spec)
+    implicit def apply(spec:FieldSpec) = wrap(spec)
   }
   
   private def intern(s:FieldSlot) = cache.cache(s.spec, s)
-  implicit def wrap(encoded: EncodedField) = cache cachedOrElse (encoded.getRef,
+  implicit def wrap(encoded: EncodedField): Known = (cache cachedOrElse (encoded.getRef,
     getReflection[Known](encoded.getRef) { _refl =>
-      new Known(encoded) with _ReflFieldSlotDesc[Reflected[Known]] {
+      new Known(encoded) with _ReflFieldSlotDesc[Known#Reflected] {
         val refl = _refl
       }
-    } {new Known(encoded)})
-  implicit def wrap(spec: FieldSpec) = cache cachedOrElse (spec,
+    } {new Known(encoded)})).asInstanceOf[Known]
+  implicit def wrap(spec: FieldSpec): Unknown = (cache cachedOrElse (spec,
     getReflection[Unknown](spec) { _refl =>
-      new Unknown(spec) with _ReflFieldSlotDesc[Reflected[Unknown]] {
+      new Unknown(spec) with _ReflFieldSlotDesc[Unknown#Reflected] {
         val refl = _refl
       }
-    } {new Unknown(spec)})
+    } {new Unknown(spec)})).asInstanceOf[Unknown]
   
-  // HACK: no recursive type aliases in Scala :/
-  private type Reflected[S <: FieldSlot] = S with _ReflFieldSlotDesc[S]
   private def getReflection[S <: FieldSlot]
-                           (spec:FieldSpec)(constr: =>JField=>Reflected[S])(default: =>S): S = {
+                           (spec:FieldSpec)(constr: =>JField=>S#Reflected)(default: =>S): S = {
     val parent = GhostClass.wrap(spec.getDefiningClass)
     val name = spec.getNat.getName.getString
     parent.typ.klass match {

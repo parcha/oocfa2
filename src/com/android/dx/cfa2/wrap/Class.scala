@@ -18,6 +18,8 @@ sealed abstract class _ClassDesc[+Self <: _ClassDesc[Self]] extends Immutable wi
   }
   protected[this] def _is(prop: Property): Tri
   
+  type Reflected = this.type with _ReflClass[Self]
+  
   final val isAccessible: Tri = {
     val locallyAccessible =
     	(this is Public) |
@@ -31,20 +33,13 @@ sealed abstract class _ClassDesc[+Self <: _ClassDesc[Self]] extends Immutable wi
     }
   }
 }
-object _ClassDesc {
-  implicit val strawmanComparator = new java.util.Comparator[ClassDesc] {
-    def compare(c1, c2) = c1.typ.descriptor.compareTo(c2.typ.descriptor)
-  }
-  implicit def strawmanOrdering[T <: ClassDesc] = mkCovariantOrdering[ClassDesc, T](strawmanComparator)
+object _ClassDesc extends StrawmanOrdering[ClassDesc] {
+  def compare(c1, c2) = c1.typ.descriptor.compareTo(c2.typ.descriptor)
 }
 
 sealed trait _DalvikClassDesc[+Self <: _DalvikClassDesc[Self]] extends _ClassDesc[Self] { _:Self =>
   val spec: ClassSpec
   lazy val typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
-}
-object _DalvikClassDesc {
-  // HACK: no recursive type aliases in Scala :/
-  private[wrap] type Reflected[C <: _DalvikClassDesc[C]] = C with _ReflClass[_]
 }
 
 sealed case class DalvikClass private (raw: RawClass) extends _DalvikClassDesc[DalvikClass] {
@@ -59,10 +54,9 @@ object DalvikClass extends Cacher[RawClass, DalvikClass] {
   implicit def wrap(raw:RawClass) = cache cachedOrElse (raw, {
     // Upgrade to ReflClass if we can
     val _typ = Type(raw.getThisClass.getClassType).asInstanceOf[Instantiable]
-    type Refl = _DalvikClassDesc.Reflected[DalvikClass]
     val c =
       if(_typ.klass != null)
-        new DalvikClass(raw) with _ReflClass[Refl] {
+        new DalvikClass(raw) with _ReflClass[DalvikClass#Reflected] {
           val typ = _typ
           val refl = _typ.klass
         }
@@ -86,10 +80,9 @@ object GhostClass extends Cacher[ClassSpec, GhostClass] {
   implicit def wrap(spec:ClassSpec) = cache cachedOrElse (spec, {
     // Upgrade to ReflClass if we can
     val _typ = Type(spec.getClassType).asInstanceOf[Instantiable]
-    type Refl = _DalvikClassDesc.Reflected[GhostClass]
     val c =
       if(_typ.klass != null)
-        new GhostClass(spec) with _ReflClass[Refl] {
+        new GhostClass(spec) with _ReflClass[GhostClass#Reflected] {
           val typ = _typ
           val refl = _typ.klass
         }
@@ -104,6 +97,7 @@ import java.lang.{Class => JClass}
 sealed trait _ReflClass[+Self <: _ReflClass[Self]] extends _ClassDesc[Self] { _:Self =>
   val refl: JClass[_]
   lazy val typ = Type(refl).asInstanceOf[Instantiable]
+  final override type Reflected = this.type
   private[this] lazy val props = Domain.Class.fromJModifiers(refl.getModifiers())
   final protected[this] def _is(prop) = props(prop)
 }

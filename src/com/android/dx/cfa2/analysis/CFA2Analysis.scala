@@ -278,9 +278,9 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
       new Builder(par.immutable.ParMap())
     }
     for(m <- methodMap.keys)
-      m.reflection match {
-        case Some(refl) => build += ((refl, m))
-        case None => // Do nothing
+      m.reflected match {
+        case Some(m) => build += ((m.refl, m))
+        case None    => // Do nothing
       }
     build result
   }
@@ -323,8 +323,6 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
         build += ((f.getRef, f))
     build result
   }
-  /** Caches unknown SField slots */
-  private[this] val sfieldCache = new MutableConcurrentMap[SFieldSpec, FieldSlot.Unknown]
   /*private[this] val sinitMap = {
     
   }*/
@@ -334,23 +332,13 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
   protected[cfa2] def liftSField(spec:SFieldSpec) : FieldSlot = 
     sfieldMap get spec match {
     case Some(slot) => slot
-    case None => sfieldCache getOrElse (spec, {
-        val f = new FieldSlot.Unknown(spec)
-        // Cache the unknown
-        sfieldCache += ((spec, f))
-        f
-      })
+    case None => FieldSlot.Unknown(spec)
     }
   @inline
   protected[cfa2] def liftIField(spec:IFieldSpec) : FieldSlot =
     ifieldMap get spec match {
     case Some(slot) => slot
-    case None => sfieldCache getOrElse (spec, {
-        val f = new FieldSlot.Unknown(spec)
-        // Cache the unknown
-        sfieldCache += ((spec, f))
-        f
-      })
+    case None => FieldSlot.Unknown(spec)
     }
   
   @inline
@@ -1027,7 +1015,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
         case code:Call =>
           val spec = ins.asInstanceOf[Instruction.Constant].constant.asInstanceOf[MethodSpec]
           lazy val ghost = GhostMethod.wrap(spec)
-          val mdesc =
+          val mdesc: DalvikMethodDesc =
             methodForSpec(spec) match {
               case None    => ghost
               case Some(m) => m
@@ -1172,7 +1160,8 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
             }
             
             // Resolve virtual methods
-            def getVMeth(obj: VAL[RefType]) = {
+            // The return type is REQUIRED in order to avoid inferring a too-specific Self-type
+            def getVMeth(obj: VAL[RefType]): DalvikMethodDesc = {
               val ilk = getIlk(obj)
               if(ilk == null) ghost
               else mdesc.matchingOverload(ilk) match {
