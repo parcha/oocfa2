@@ -2,7 +2,7 @@ package com.android.dx.cfa2.adt
 
 import scala.collection._
 
-abstract class MapFactory[K, +V, +_M[K,V] <: MapFactory.Mapped[K, V, _M[K,V]]]
+abstract class MapFactory[K, V, _M[K,V] <: MapFactory.Mapped[K, V, _M[K,V]]]
 (private[this] val empty: _M[K,V]) { factory_ =>
   final type M = _M[K,V]
   class Builder(start:M = empty) extends mutable.MapBuilder[K, V, M](start) /*with MapLike[K, V, M]*/
@@ -26,8 +26,8 @@ object MapFactory {
   type Mapped[K,+V,+M <: Mapped[K,V,M]] = GenMap[K,V] with GenMapLike[K,V,M]
 }
 
-abstract class MapProxyFactory[K, +V, 
-                               +M[K,V] <: MapProxyFactory.Mapped[K,V,M[K,V]],
+abstract class MapProxyFactory[K, V, 
+                               M[K,V] <: MapProxyFactory.Mapped[K,V,M[K,V]],
                                +_Proxy <: MapProxyLike[K,V,M[K,V]]]
 (empty: M[K,V], private[this] val proxyCtor: M[K,V] => _Proxy)
 extends MapFactory[K, V, M](empty) { factory_ =>
@@ -44,5 +44,5 @@ extends MapFactory[K, V, M](empty) { factory_ =>
   final implicit def wrap(m: M): Proxy =  proxyCtor(m)
 }
 object MapProxyFactory {
-  type Mapped[K,+V, +M <: Mapped[K,V,M]] = GenMap[K,V] with GenMapLike[K,V,M]
+  type Mapped[K,+V, +M <: Mapped[K,V,M]] = Map[K,V] with MapLike[K,V,M]
 }

@@ -27,8 +27,8 @@ extends Immutable with NotNull { _:Self =>
   }
   
   final def arity: Int = argTs.size
-  def argTs: Seq[Instantiable]
-  def retT: Instantiable
+  val argTs: Seq[Instantiable]
+  val retT: Instantiable
   final lazy val exnTs: Option[Seq[Exceptional]] = exnCs match {
     case None     => None
     case Some(cs) =>
@@ -38,19 +38,19 @@ extends Immutable with NotNull { _:Self =>
   def argCs : Option[Seq[JClass[_]]]
   def exnCs : Option[Seq[JClass[_]]]
   
-  type Reflected = this.type with _ReflMethodDesc[Self]
+  final type Reflected = Self with _ReflMethodDesc[Self]
   // HACK: Can't use nicer pattern-matching because of bug SI-7505
   def ifReflected[R](_then: =>Reflected=>R)(_else: =>R): R =
     if(this.isInstanceOf[Reflected]) _then(this.asInstanceOf[Reflected])
     else _else
   val reflected = ifReflected[Option[Reflected]] {Some(_)} {None}
   
-  type Dalviked = this.type with _DalvikMethodDesc[Self]
+  /*final type Dalviked = Self with _DalvikMethodDesc[Self]
   // HACK: Can't use nicer pattern-matching because of bug SI-7505
   def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R): R =
     if(this.isInstanceOf[Dalviked]) _then(this.asInstanceOf[Dalviked])
     else _else
-  val dalviked = ifDalviked[Option[Dalviked]] {Some(_)} {None}
+  val dalviked = ifDalviked[Option[Dalviked]] {Some(_)} {None}*/
   
   /** Get the overload in klass that matches this method, if any **/
   final def matchingOverload(klass: JClass[_]): Option[JMethod] = argCs match {
@@ -126,17 +126,17 @@ object _MethodDesc extends StrawmanOrdering[MethodDesc] {
 
 sealed trait _DalvikMethodDesc[+Self <: _DalvikMethodDesc[Self]]
 extends _MethodDesc[Self] { _:Self =>
-  final def name = nat.getName.getString
+  val name = nat.getName.getString
   
   def prototype: dx.rop.`type`.Prototype
-  final lazy val argTs =
+  val argTs: Seq[Instantiable] =
     for(i <- 0 until prototype.getParameterTypes.size)
       // TODO: Should this be ParameterFrameTypes?
       yield Type(prototype.getParameterTypes.get(i)).asInstanceOf[Instantiable]
-  final lazy val retT = Type(prototype.getReturnType).asInstanceOf[Instantiable]
+  val retT = Type(prototype.getReturnType).asInstanceOf[Instantiable]
   
   // Reflection support
-  final lazy val argCs =
+  lazy val argCs =
     if(_argCs contains None) None
     else Some(_argCs.flatten)
   /** More primitive argCs that lets one see which args in particular failed **/
@@ -148,11 +148,11 @@ extends _MethodDesc[Self] { _:Self =>
           case null  => None
           case klass => Some(klass)
         }
-  val exnCs = None
+  val exnCs: Option[Seq[JClass[_]]] = None
   
-  final override type Dalviked = this.type
-  final override def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R) = _then(this)
-  final override val dalviked = Some(this)
+  /*override final def ifDalviked[R](_then: =>Dalviked=>R)(_else: =>R) =
+    _then(this.asInstanceOf[Dalviked])
+  override final val dalviked = Some(this)*/
   
   protected[this] def nat: dx.rop.cst.CstNat
   final val isInstanceInit = nat.isInstanceInit
@@ -186,7 +186,7 @@ extends _DalvikMethodDesc[DalvikMethod] {
   
   private[this] lazy val props = prop.Range(prop.Domain.Method, accessFlags)
   protected[this] def _is(prop: Property) = props contains prop
-  val parent = GhostClass.wrap(raw.getDefiningClass)
+  override final val parent = GhostClass.wrap(raw.getDefiningClass)
   def accessFlags = raw.getAccessFlags
   // FIXME: We need to exclude the "this" so we can vary on it; also lines up with Ghost and Refl
   def prototype = raw.getEffectiveDescriptor
@@ -213,9 +213,9 @@ object DalvikMethod extends Cacher[(Raw, RopMethod), DalvikMethod] {
 sealed case class GhostMethod private (val spec:MethodSpec)
 extends _DalvikMethodDesc[GhostMethod] {
   def prototype = spec.getPrototype
-  val parent = GhostClass.wrap(spec.getDefiningClass)
+  override final val parent = GhostClass.wrap(spec.getDefiningClass)
   protected[this] def nat = spec.getNat
-  protected[this] def _is(prop: Property) = Tri.U
+  protected[this] def _is(prop): Tri = Tri.U
 }
 object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
   private def intern(m:GhostMethod) = cache.cache (m.spec, m)
@@ -233,17 +233,17 @@ object GhostMethod extends Cacher[MethodSpec, GhostMethod] {
 }
 
 
-sealed trait _ReflMethodDesc[+Self <: _ReflMethodDesc[Self]]
-extends _MethodDesc[Self] { _:Self =>
+sealed trait _ReflMethodDesc[+Self <: _MethodDesc[Self]]
+extends _MethodDesc[Self#Reflected] { _:Self#Reflected =>
   val refl: JMethod // TODO: Change back to JMember when we support Constructors
-  final def name = refl.getName
-  final lazy val parent = ReflClass(refl.getDeclaringClass())
+  override final val name = refl.getName
   
-  final def argTs = for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
+  override final val argTs =
+    for(klass <- argCs.get) yield Type(klass).asInstanceOf[Instantiable]
   
-  final override type Reflected = this.type
-  final override def ifReflected[R](_then: =>Reflected=>R)(_else: =>R) = _then(this)
-  final override val reflected = Some(this)
+  override final def ifReflected[R](_then: =>Reflected=>R)(_else: =>R) =
+    _then(this.asInstanceOf[Reflected])
+  override final val reflected = Some(this.asInstanceOf[Reflected])
   
   private[this] final lazy val props = Domain.Method.fromJMember(refl)
   override protected[this] final def _is(prop) = props(prop)
@@ -251,14 +251,16 @@ extends _MethodDesc[Self] { _:Self =>
   override final def toString = refl toString
 }
 
-sealed trait _ReflMethod[+Self <: _ReflMethod[Self]]
+sealed trait _ReflMethod[+Self <: _MethodDesc[Self]]
 extends _ReflMethodDesc[Self] { _:Self =>
   val refl: JMethod
-  final def retT = Type(refl.getReturnType).asInstanceOf[Instantiable]
-  final def argCs = Some(refl.getParameterTypes.toSeq)
-  final def exnCs = Some(refl.getExceptionTypes)
+  override final val retT = Type(refl.getReturnType).asInstanceOf[Instantiable]
+  override final lazy val argCs = Some(refl.getParameterTypes.toSeq)
+  override final val exnCs: Option[Seq[JClass[_]]] = Some(refl.getExceptionTypes)
 }
-final case class ReflMethod private (val refl: JMethod) extends _ReflMethod[ReflMethod]
+final case class ReflMethod private (val refl: JMethod) extends _ReflMethod[ReflMethod] {
+  val parent = ReflClass(refl.getDeclaringClass())
+}
 object ReflMethod extends Cacher[JMethod, ReflMethod] {
   private def intern(m:ReflMethod) = cache.cache (m.refl, m)
   implicit def wrap(refl:JMethod) = cache cachedOrElse (refl, intern(new ReflMethod(refl)))

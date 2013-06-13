@@ -11,14 +11,14 @@ import `val`._
 import adt.Cacher
 
 sealed abstract class _ClassDesc[+Self <: _ClassDesc[Self]] extends Immutable with NotNull { _:Self=>
-  def typ: Instantiable
+  val typ: Instantiable
   final def is(prop: Property) = {
     assert(Domain.Class contains prop)
     _is(prop)
   }
   protected[this] def _is(prop: Property): Tri
   
-  type Reflected = this.type with _ReflClass[Self]
+  final type Reflected = Self with _ReflClass[Self]
   
   final val isAccessible: Tri = {
     val locallyAccessible =
@@ -37,9 +37,10 @@ object _ClassDesc extends StrawmanOrdering[ClassDesc] {
   def compare(c1, c2) = c1.typ.descriptor.compareTo(c2.typ.descriptor)
 }
 
-sealed trait _DalvikClassDesc[+Self <: _DalvikClassDesc[Self]] extends _ClassDesc[Self] { _:Self =>
+sealed trait _DalvikClassDesc[+Self <: _DalvikClassDesc[Self]]
+extends _ClassDesc[Self] { _:Self =>
   val spec: ClassSpec
-  lazy val typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
+  val typ: Instantiable = Type(spec.getClassType).asInstanceOf[Instantiable]
 }
 
 sealed case class DalvikClass private (raw: RawClass) extends _DalvikClassDesc[DalvikClass] {
@@ -57,7 +58,7 @@ object DalvikClass extends Cacher[RawClass, DalvikClass] {
     val c =
       if(_typ.klass != null)
         new DalvikClass(raw) with _ReflClass[DalvikClass#Reflected] {
-          val typ = _typ
+          override val typ = _typ
           val refl = _typ.klass
         }
       else new DalvikClass(raw)
@@ -83,7 +84,7 @@ object GhostClass extends Cacher[ClassSpec, GhostClass] {
     val c =
       if(_typ.klass != null)
         new GhostClass(spec) with _ReflClass[GhostClass#Reflected] {
-          val typ = _typ
+          override val typ = _typ
           val refl = _typ.klass
         }
       else new GhostClass(spec)
@@ -94,14 +95,11 @@ object GhostClass extends Cacher[ClassSpec, GhostClass] {
 
 
 import java.lang.{Class => JClass}
-sealed trait _ReflClass[+Self <: _ReflClass[Self]] extends _ClassDesc[Self] { _:Self =>
+sealed trait _ReflClass[+Self <: _ClassDesc[Self]]
+extends _ClassDesc[Self#Reflected] { _:Self#Reflected =>
   val refl: JClass[_]
-  lazy val typ = Type(refl).asInstanceOf[Instantiable]
-  final override type Reflected = this.type
+  val typ = Type(refl).asInstanceOf[Instantiable]
   private[this] lazy val props = Domain.Class.fromJModifiers(refl.getModifiers())
-  final protected[this] def _is(prop) = props(prop)
+  override protected[this] final def _is(prop) = props(prop)
 }
 final case class ReflClass(refl: JClass[_]) extends _ReflClass[ReflClass]
-object ReflClass {
-  
-}

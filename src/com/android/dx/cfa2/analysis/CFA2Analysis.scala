@@ -297,7 +297,7 @@ abstract class CFA2Analysis[+O<:Opts](contexts : java.lang.Iterable[Context], op
     build result
   }
   protected[cfa2] final val classes =
-    (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (DalvikClass(_)).toSet
+    (for(c <- contexts) yield c.getClasses).flatten.toSeq.distinct.map (DalvikClass.wrap(_)).toSet
   protected[cfa2] final val cdis = for(c <- classes) yield c.getCDI
   /** Holds known IField slots */
   protected[cfa2] final val ifieldMap = {
