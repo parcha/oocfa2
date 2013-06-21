@@ -44,6 +44,8 @@ abstract class WrappedLeafScheme[+Self <: WrappedLeafScheme[Self, ShellScheme] w
 extends RegionScheme[Self, ShellScheme] { _:Self =>
   final type Map_ = Map[Address_, Referent]
   type Address_
+  implicit def unwrapAddress(addr: Address): Address_
+  implicit def wrapAddress(addr: Address_): Address
 }
 
 object _Heap {
@@ -125,19 +127,18 @@ object _Heap {
                                   Scheme <: WrappedLeafScheme[Scheme, _]]
   (proxy: Scheme#Map_)(implicit val scheme: Scheme)
   extends _Heap[Self, Scheme] { _:Self =>
+    import scheme.{unwrapAddress, wrapAddress}
     final type Address_ = Scheme#Address_
-    implicit def unwrapAddress(addr: Address): Address_
-    implicit def wrapAddress(addr: Address_): Address
     
     @inline
     protected[this] def constructor(proxy: Scheme#Map_): Self
     /** Convenience functions to force a correct down-cast **/
     @inline
     protected[this] final def addr_[A <: Address_](addr: Address): A =
-      unwrapAddress(addr.asInstanceOf[Address]).asInstanceOf[A]
+      unwrapAddress(addr.asInstanceOf[scheme.Address]).asInstanceOf[A]
     @inline
     protected[this] final def _addr[A <: Address_](addr: A): Address =
-      wrapAddress(addr.asInstanceOf[Address_])
+      wrapAddress(addr.asInstanceOf[scheme.Address_])
     @inline
     protected[this] final def kv_[K <: Address, V <: Referent, R >: Referent](kv: (Address,R)) =
       kv.asInstanceOf[(K,V)]
