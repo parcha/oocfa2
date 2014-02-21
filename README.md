@@ -1,7 +1,10 @@
 OOCFA2
 ======
 
-This is a public view of my Master's thesis work.  The abstract is copied below.
+This is a public view of my Master's thesis work.  Unfortunately, at the moment it cannot be built without a few invasive changes to the Android codebase and without using Eclipse to bridge the Android buildsystem and this one.  Until I've had the opportunity to change this, the purpose of this repository is simply to expose the work for viewing.
+
+Abstract
+------
 
 The application of higher-order PDA-based flow analyses to object-oriented languages enables comprehensive and precise characterization of program behavior, while retaining practicality with efficiency. We implement one such flow analysis which we've named OOCFA2.
 
